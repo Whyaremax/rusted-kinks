@@ -109,3 +109,32 @@ JavaScript. This route is still an end-to-end integration test because those
 systems repeatedly call the installed pathfinding adapter while the bootstrap,
 signature gate, native bridge, validation, and per-call fallback remain active.
 It is not evidence that every listed game subsystem has already been rewritten.
+
+## Automated 120-enemy pathfinding stress test
+
+Launch the isolated executable with a loopback-only Chromium debugging endpoint:
+
+```powershell
+& "H:\...\kinkydungen-kd-hybrid-test\KinkyDungeon.exe" `
+  "--user-data-dir=H:\...\kinkydungen-kd-hybrid-test\user-data" `
+  "--remote-debugging-address=127.0.0.1" `
+  "--remote-debugging-port=9223"
+```
+
+Then run:
+
+```powershell
+npm run test:local:pathfinding
+```
+
+The harness creates a fresh isolated run, places 120 real `Maidforce` entities
+on valid map tiles, and measures the same 120 paths with the upstream
+JavaScript implementation and the native adapter. It checks reachability and
+path validity, exercises all 19 upstream `KinkyDungeonFindPath` arguments,
+requires exact results for calls routed to JavaScript fallback, tests the
+public `KDHybrid` API surface, and invokes the built-in map-generation,
+full-runthrough, and jailer samplers. A machine-readable report is written to
+`artifacts/pathfinding-stress-latest.json`.
+
+The debugging endpoint is only needed for automation and should remain bound
+to `127.0.0.1`. Normal test launches do not expose it.
