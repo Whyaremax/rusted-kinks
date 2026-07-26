@@ -1,6 +1,6 @@
 # KD Hybrid
 
-KD Hybrid is an open-source performance and compatibility layer for Kinky
+KD Hybrid (also known as rusted kinks) is an open-source performance and compatibility layer for Kinky
 Dungeon. It keeps the Electron/Pixi user interface and the existing JavaScript
 mod ecosystem, while moving batch-friendly simulation work into a deterministic
 Rust core compiled to WebAssembly.
