@@ -14,5 +14,7 @@
   pathfinding microbenchmark speedup on the documented local host.
 - Corrected release detection to distinguish the in-game 5.4.92 version from
   the Electron package metadata version 5.1.12 and verify both independently.
+- Added a reproducible Windows test installation with a copied game runtime,
+  dedicated Electron user data, live-file/save guards, and patcher status checks.
 - Kept original KD Hybrid work under MIT while isolating KD-adapted files under
   MPL-2.0 and shipping attribution, licenses, and their exact source.

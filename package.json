@@ -26,7 +26,10 @@
     "rust:lint": "cargo clippy --workspace --all-targets -- -D warnings",
     "rust:test": "cargo test --workspace",
     "package": "npm run build && node packages/tools/dist/cli.js package --output artifacts/kd-hybrid.zip",
-    "verify:safety": "node scripts/verify-save-safety.mjs"
+    "verify:safety": "node scripts/verify-save-safety.mjs",
+    "test:local:setup": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/local-test-install.ps1 -Action Setup",
+    "test:local:status": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/local-test-install.ps1 -Action Status",
+    "test:local:launch": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/local-test-install.ps1 -Action Launch"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
