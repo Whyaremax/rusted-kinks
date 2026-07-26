@@ -2,7 +2,9 @@ import type { SignatureCandidate } from "./signatures.js";
 import type { SystemName } from "./types.js";
 
 export const KNOWN_UPSTREAM = {
-  version: "5.1.12",
+  version: "5.4.92",
+  gameVersion: "5.4.92",
+  packageVersion: "5.1.12",
   bundleSha256: "2d3041a085cbe475a63227ff40709f6d9c1595c77a58545c69edf359a57605a4"
 } as const;
 
@@ -19,7 +21,7 @@ function candidate(
   normalizedHash?: string
 ): SignatureCandidate {
   return {
-    id: `${KNOWN_UPSTREAM.version}:${globalName}`,
+    id: `${KNOWN_UPSTREAM.gameVersion}:${globalName}`,
     name: globalName,
     arity,
     sentinels,
@@ -31,7 +33,7 @@ function candidate(
  * Metadata only: names, arities and identifier sentinels. No upstream source is
  * copied into this project.
  */
-export const UPSTREAM_5_1_12_FACADES: readonly UpstreamFacade[] = [
+export const UPSTREAM_5_4_92_FACADES: readonly UpstreamFacade[] = [
   {
     system: "mapGeneration",
     globalName: "KinkyDungeonCreateMap",

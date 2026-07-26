@@ -36,6 +36,9 @@ export function installBootstrap(): BootstrapHandle {
     ...(config?.upstreamVersion === undefined
       ? {}
       : { upstreamVersion: config.upstreamVersion }),
+    ...(config?.upstreamPackageVersion === undefined
+      ? {}
+      : { upstreamPackageVersion: config.upstreamPackageVersion }),
     ...(config?.upstreamBundleSha256 === undefined
       ? {}
       : { upstreamBundleSha256: config.upstreamBundleSha256 })

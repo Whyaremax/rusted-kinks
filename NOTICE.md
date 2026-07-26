@@ -26,8 +26,10 @@ or behavior adapted into MPL-marked files.
 The Kinky Dungeon game, name, artwork, audio, writing, and other assets are not
 included in this repository and are not licensed by KD Hybrid.
 
-Compatibility metadata was validated against Kinky Dungeon 5.1.12. The
-inspected upstream bundle had SHA-256:
+Compatibility metadata was validated against the in-game Kinky Dungeon version
+5.4.92. The same build's Electron `resources/app/package.json` reports package
+version 5.1.12; package metadata is recorded separately and is not treated as
+the game content version. The inspected upstream bundle had SHA-256:
 
 `2d3041a085cbe475a63227ff40709f6d9c1595c77a58545c69edf359a57605a4`
 

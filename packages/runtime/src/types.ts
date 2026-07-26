@@ -49,6 +49,7 @@ export interface RuntimeStatus {
   readonly abiVersion: number;
   readonly initialized: boolean;
   readonly upstreamVersion: string | null;
+  readonly upstreamPackageVersion: string | null;
   readonly upstreamBundleSha256: string | null;
   readonly nativeAvailable: boolean;
   readonly systems: readonly SystemStatus[];
@@ -120,6 +121,7 @@ declare global {
   var KDHybridBootstrapConfig:
     | {
         upstreamVersion?: string;
+        upstreamPackageVersion?: string;
         upstreamBundleSha256?: string;
         wasmUrl?: string;
         quality?: "high" | "balanced" | "performance" | "auto";

@@ -3,7 +3,7 @@
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
-// Compatibility behavior in this file is adapted from Kinky Dungeon 5.1.12.
+// Compatibility behavior in this file is adapted from Kinky Dungeon 5.4.92.
 
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
@@ -156,7 +156,7 @@ pub fn find_path(
 /// are an additional movement cost in quarter-step units. The returned path
 /// includes both start and goal; host adapters may omit the start to match an
 /// upstream API. Open-set insertion order, goal handling, the default
-/// heuristic, and diagonal turn penalties intentionally follow KD 5.1.12.
+/// heuristic, and diagonal turn penalties intentionally follow KD 5.4.92.
 #[must_use]
 // Keeping the audited upstream control-flow correspondence in one function is
 // more valuable here than splitting the search loop across opaque helpers.

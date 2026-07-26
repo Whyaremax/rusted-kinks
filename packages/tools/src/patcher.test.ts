@@ -4,9 +4,16 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { install, status, uninstall } from "./patcher.js";
+import { KNOWN_BUNDLES, install, status, uninstall } from "./patcher.js";
 
 const fixtures: string[] = [];
+
+it("distinguishes the in-game and Electron package versions", () => {
+  expect(KNOWN_BUNDLES["5.4.92"]).toEqual({
+    packageVersion: "5.1.12",
+    bundleSha256: "2d3041a085cbe475a63227ff40709f6d9c1595c77a58545c69edf359a57605a4"
+  });
+});
 
 afterEach(async () => {
   const { rm } = await import("node:fs/promises");

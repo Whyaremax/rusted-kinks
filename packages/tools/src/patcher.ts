@@ -16,7 +16,10 @@ import { sha256Bytes, sha256File } from "./hash.js";
 import { assertExactChild, portablePath, resolveInside } from "./paths.js";
 
 export const KNOWN_BUNDLES = Object.freeze({
-  "5.1.12": "2d3041a085cbe475a63227ff40709f6d9c1595c77a58545c69edf359a57605a4"
+  "5.4.92": Object.freeze({
+    packageVersion: "5.1.12",
+    bundleSha256: "2d3041a085cbe475a63227ff40709f6d9c1595c77a58545c69edf359a57605a4"
+  })
 });
 
 export const BOOTSTRAP_SCRIPT_PATH = "kd-hybrid/kd-hybrid-bootstrap.js";
@@ -35,6 +38,7 @@ export interface InstallationManifest {
   readonly appRoot: ".";
   readonly upstream: {
     readonly version: string | null;
+    readonly packageVersion: string | null;
     readonly bundlePath: "out/main.js";
     readonly bundleSha256: string;
     readonly known: boolean;
@@ -91,16 +95,19 @@ export async function install(options: InstallOptions): Promise<PatcherStatus> {
 
   const bundlePath = resolveInside(appRoot, "out/main.js");
   const bundleSha256 = await sha256File(bundlePath);
-  const requestedKnownHash =
+  const requestedKnownBundle =
     options.upstreamVersion === undefined
       ? undefined
       : KNOWN_BUNDLES[options.upstreamVersion as keyof typeof KNOWN_BUNDLES];
-  const detectedVersion = Object.entries(KNOWN_BUNDLES).find(
-    ([, hash]) => hash === bundleSha256
-  )?.[0];
+  const detectedBundle = Object.entries(KNOWN_BUNDLES).find(
+    ([, metadata]) => metadata.bundleSha256 === bundleSha256
+  );
+  const detectedVersion = detectedBundle?.[0];
+  const detectedPackageVersion = detectedBundle?.[1].packageVersion;
   const known =
     detectedVersion !== undefined ||
-    (requestedKnownHash !== undefined && requestedKnownHash === bundleSha256);
+    (requestedKnownBundle !== undefined &&
+      requestedKnownBundle.bundleSha256 === bundleSha256);
   if (!known && options.allowUnknownBundle !== true) {
     throw new Error(
       `Unknown out/main.js SHA-256 ${bundleSha256}; use a normal mod ZIP or explicitly allow an inert bootstrap`
@@ -115,6 +122,10 @@ export async function install(options: InstallOptions): Promise<PatcherStatus> {
   }
   const config = escapeInlineJson({
     upstreamVersion: detectedVersion ?? options.upstreamVersion ?? null,
+    upstreamPackageVersion:
+      detectedPackageVersion ??
+      requestedKnownBundle?.packageVersion ??
+      null,
     upstreamBundleSha256: bundleSha256,
     quality: "auto"
   });
@@ -150,6 +161,10 @@ export async function install(options: InstallOptions): Promise<PatcherStatus> {
     appRoot: ".",
     upstream: {
       version: detectedVersion ?? options.upstreamVersion ?? null,
+      packageVersion:
+        detectedPackageVersion ??
+        requestedKnownBundle?.packageVersion ??
+        null,
       bundlePath: "out/main.js",
       bundleSha256,
       known

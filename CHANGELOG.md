@@ -8,9 +8,11 @@
 - Added adaptive quality, asset lifetime, capability plugin, and scrubbed
   diagnostics controllers.
 - Added a reversible bootstrap patcher, portable packager, and synthetic tests.
-- Added the first real 5.1.12 integration: a normalized-signature-gated,
+- Added the first real 5.4.92 integration: a normalized-signature-gated,
   weighted native pathfinding adapter with per-call JavaScript fallback.
-- Verified exact path parity on 100 deterministic fixtures and a 1.798x
+- Verified exact path parity on 100 deterministic fixtures and a 1.824x
   pathfinding microbenchmark speedup on the documented local host.
+- Corrected release detection to distinguish the in-game 5.4.92 version from
+  the Electron package metadata version 5.1.12 and verify both independently.
 - Kept original KD Hybrid work under MIT while isolating KD-adapted files under
   MPL-2.0 and shipping attribution, licenses, and their exact source.

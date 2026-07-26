@@ -20,13 +20,14 @@ import type {
   WasmPluginHandle,
   WasmPluginManifest
 } from "./types.js";
-import { KNOWN_UPSTREAM, UPSTREAM_5_1_12_FACADES } from "./upstream.js";
+import { KNOWN_UPSTREAM, UPSTREAM_5_4_92_FACADES } from "./upstream.js";
 
 export const VERSION = "0.1.0";
 
 export interface RuntimeOptions {
   readonly target?: Record<string, unknown>;
   readonly upstreamVersion?: string;
+  readonly upstreamPackageVersion?: string;
   readonly upstreamBundleSha256?: string;
   readonly qualityMode?: QualityMode;
   readonly qualityEnvironment?: QualityEnvironment;
@@ -99,7 +100,7 @@ export class KDHybridRuntime {
     globalName: string,
     handler: (...args: unknown[]) => unknown
   ): SystemStatus {
-    const facade = UPSTREAM_5_1_12_FACADES.find(
+    const facade = UPSTREAM_5_4_92_FACADES.find(
       (candidate) => candidate.globalName === globalName
     );
     if (facade === undefined) {
@@ -160,6 +161,7 @@ export class KDHybridRuntime {
       abiVersion: ABI_VERSION,
       initialized: this.#initialized,
       upstreamVersion: this.#options.upstreamVersion ?? null,
+      upstreamPackageVersion: this.#options.upstreamPackageVersion ?? null,
       upstreamBundleSha256: this.#options.upstreamBundleSha256 ?? null,
       nativeAvailable: !bridge.disabled,
       systems: this.dispatcher.status()

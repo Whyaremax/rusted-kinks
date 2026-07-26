@@ -6,14 +6,14 @@ quality tier, warm-up period, and action trace for both paths.
 ## Current verified microbenchmark
 
 On 2026-07-26, the release WASM pathfinder was compared directly with
-`KinkyDungeonFindPath` extracted from the installed KD 5.1.12 `main.js`.
+`KinkyDungeonFindPath` extracted from the installed KD 5.4.92 `main.js`.
 
 - Fixture: deterministic 61 by 39 grid with a 24% interior wall rate.
 - Sampling: 100 warm-up calls, then the median of seven 1,000-call samples.
 - Upstream path caching: disabled so both sides performed the path search.
-- JavaScript: 420.497 microseconds per call.
-- Rust/WASM: 233.898 microseconds per call.
-- Measured pathfinding speedup: 1.798x.
+- JavaScript: 396.015 microseconds per call.
+- Rust/WASM: 217.105 microseconds per call.
+- Measured pathfinding speedup: 1.824x.
 - Route parity: 100 of 100 deterministic start/goal fixtures matched exactly;
   the timed route was also identical at 60 steps.
 - Native bridge failures: zero across the benchmark.
@@ -28,7 +28,7 @@ node scripts/benchmark-native-pathfinding.mjs `
 ```
 
 This is a focused pathfinding microbenchmark, not a claim that the whole game is
-1.798x faster. End-to-end frame time, turn latency, startup, memory, real maps,
+1.824x faster. End-to-end frame time, turn latency, startup, memory, real maps,
 and mod-heavy traces still need measurement inside Electron. Unsupported call
 shapes intentionally fall back to the official JavaScript function.
 

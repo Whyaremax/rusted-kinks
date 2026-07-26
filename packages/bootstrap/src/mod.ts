@@ -70,10 +70,30 @@ function findModFile(suffix: string): string | null {
 
 function detectVersion(): string | undefined {
   const target = globalThis as Record<string, unknown>;
-  for (const name of ["KinkyDungeonVersion", "KDVersion", "KinkyDungeonGameVersion"]) {
+  for (const name of [
+    "KinkyDungeonVersion",
+    "KDVersionStr",
+    "KDVersion",
+    "KinkyDungeonGameVersion"
+  ]) {
     const value = target[name];
-    if (typeof value === "string") {
+    if (typeof value === "string" && /^\d+\.\d+(?:\.\d+)?$/u.test(value)) {
       return value;
+    }
+  }
+  const textGet = target.TextGet;
+  if (typeof textGet === "function") {
+    try {
+      const value = Reflect.apply(textGet, target, ["KDVersionStr"]);
+      if (
+        typeof value === "string" &&
+        /^\d+\.\d+(?:\.\d+)?$/u.test(value)
+      ) {
+        return value;
+      }
+    } catch {
+      // Localization may not be initialized yet; function signatures still
+      // gate native registration independently.
     }
   }
   return undefined;

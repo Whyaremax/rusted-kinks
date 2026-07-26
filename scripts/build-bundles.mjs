@@ -106,7 +106,9 @@ await writeFile(
       version: metadata.version,
       abi: 1,
       upstream: {
-        version: "5.1.12",
+        version: "5.4.92",
+        gameVersion: "5.4.92",
+        packageVersion: "5.1.12",
         bundleSha256:
           "2d3041a085cbe475a63227ff40709f6d9c1595c77a58545c69edf359a57605a4"
       }

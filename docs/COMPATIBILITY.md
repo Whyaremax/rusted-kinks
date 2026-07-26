@@ -7,9 +7,14 @@ upstream bundle hash, function name, arity, normalized-source hash, sentinel
 tokens, and a side-effect-free probe. Exactly one candidate must match.
 Unknown or ambiguous candidates remain on official JavaScript.
 
-The initial adapter catalog targets upstream 5.1.12 and records metadata and
-hashes, never upstream source. Files implementing behavior adapted from the
-upstream game are separately marked MPL-2.0.
+The initial adapter catalog targets upstream game version 5.4.92 and records
+metadata and hashes, never upstream source. Files implementing behavior adapted
+from the upstream game are separately marked MPL-2.0.
+
+`upstreamVersion` means the in-game `KDVersionStr` value. The inspected build
+reports 5.4.92 there, while Electron's `resources/app/package.json` reports
+package version 5.1.12. KD Hybrid records both values and uses the bundle hash
+and function signature as the executable compatibility gates.
 
 ## Legacy JavaScript mods
 
@@ -26,7 +31,7 @@ upstream loader or evaluate mod code itself.
 | Uses network or Electron APIs | Unchanged; governed by upstream Electron |
 | Depends on exact function source text | Unsupported; system falls back |
 
-Initial facade candidates from 5.1.12 include
+Initial facade candidates from 5.4.92 include
 `KinkyDungeonCreateMap`, `KinkyDungeonAdvanceTime`,
 `KinkyDungeonEnemyLoop`, `KinkyDungeonEnemyTryMove`,
 `KinkyDungeonEnemyTryAttack`, `KinkyDungeonMove`,
@@ -37,7 +42,7 @@ Initial facade candidates from 5.1.12 include
 ## Current integrated adapter
 
 Version 0.1 enables only `KinkyDungeonFindPath`, and only when the exact
-5.1.12 normalized source signature matches. Static map searches are encoded as
+5.4.92 normalized source signature matches. Static map searches are encoded as
 one snapshot plus one weighted grid query. Enemy-aware searches, custom
 heuristics, long-distance trimming, pass-through-enemy rules, and leash-target
 rules use the captured official JavaScript function for that call.

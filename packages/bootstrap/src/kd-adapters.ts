@@ -4,7 +4,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 //
-// Compatibility behavior in this file is adapted from Kinky Dungeon 5.1.12.
+// Compatibility behavior in this file is adapted from Kinky Dungeon 5.4.92.
 
 import {
   decodeQueryResponse,
