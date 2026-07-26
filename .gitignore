@@ -1,0 +1,48 @@
+# JavaScript
+node_modules/
+**/dist/
+coverage/
+*.tsbuildinfo
+npm-debug.log*
+
+# Rust
+target/
+
+# Generated distribution artifacts
+artifacts/
+*.zip
+*.wasm
+*.wasm.map
+
+# Local upstream inspection (never redistribute KD code or assets)
+upstream/
+vendor/
+game/
+resources/
+*.asar
+*.asar.unpacked/
+
+# Save data and profiles
+saves/
+save/
+profiles/
+KinkyDungeon/
+Kinky Dungeon/
+*.save
+*.sav
+*.profile
+*.localstorage
+*.indexeddb
+
+# Patcher state and backups
+.kd-hybrid/
+.kd-hybrid-backup/
+installation.json
+
+# Editors / operating systems
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
+Desktop.ini

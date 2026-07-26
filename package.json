@@ -1,0 +1,41 @@
+{
+  "name": "kd-hybrid-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "An open-source hybrid Rust/WASM performance layer and compatibility host for Kinky Dungeon.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "clean": "node scripts/clean.mjs",
+    "build": "npm run build:wasm && npm run build:ts && npm run build:bundle",
+    "build:ts": "tsc -b",
+    "build:bundle": "node scripts/build-bundles.mjs",
+    "build:wasm": "wasm-pack build crates/kd-wasm --release --target web --out-dir ../../dist/wasm-web --out-name kd_hybrid_core && wasm-pack build crates/kd-wasm --release --target no-modules --out-dir ../../dist/wasm-nomod --out-name kd_hybrid_core",
+    "check": "npm run typecheck && npm run test && npm run rust:test",
+    "typecheck": "tsc -b --pretty false",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "rust:fmt": "cargo fmt --all -- --check",
+    "rust:lint": "cargo clippy --workspace --all-targets -- -D warnings",
+    "rust:test": "cargo test --workspace",
+    "package": "npm run build && node packages/tools/dist/cli.js package --output artifacts/kd-hybrid.zip",
+    "verify:safety": "node scripts/verify-save-safety.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@vitest/coverage-v8": "^3.2.4",
+    "esbuild": "^0.25.6",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  },
+  "dependencies": {
+    "fflate": "^0.8.2"
+  }
+}
