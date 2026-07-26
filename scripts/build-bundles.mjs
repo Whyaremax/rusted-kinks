@@ -91,7 +91,7 @@ for (const destination of [bootstrapOutput, modOutput]) {
       "KD Hybrid source notice",
       "",
       "MPL-covered source files are included under source/MPL-2.0/.",
-      "Full project source: https://github.com/kd-hybrid/kd-hybrid",
+      "Full project source: https://github.com/Whyaremax/rusted-kinks",
       ""
     ].join("\n")
   );

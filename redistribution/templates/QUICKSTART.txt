@@ -1,0 +1,40 @@
+KD Hybrid quick start
+=====================
+
+This kit does not include Kinky Dungeon. Obtain the game separately from its
+official distribution.
+
+OPTIONAL EARLY BOOTSTRAP PATCH
+
+Requires Node.js 22 or newer.
+
+Open PowerShell in this folder and run:
+
+  .\KDHybrid-Patcher.ps1 -Action Install -GameRoot "C:\Path\To\Kinky Dungeon"
+
+Check it later:
+
+  .\KDHybrid-Patcher.ps1 -Action Status -GameRoot "C:\Path\To\Kinky Dungeon"
+
+Remove the bootstrap and restore the backed-up index:
+
+  .\KDHybrid-Patcher.ps1 -Action Uninstall -GameRoot "C:\Path\To\Kinky Dungeon"
+
+The patcher refuses unknown game bundles by default. Do not bypass that check
+unless you are developing and have independently verified compatibility.
+
+SAVE SAFETY
+
+The patcher does not access Electron userData or the game's save directory.
+It changes resources/app/index.html and writes its own files
+under resources/app/kd-hybrid. It keeps its backup and installation manifest
+under resources/app/.kd-hybrid.
+
+Normal mods are intentionally not managed by this patcher. Install those with
+Kinky Dungeon's existing mod workflow.
+
+LICENSES
+
+Original KD Hybrid files are MIT licensed. Specifically marked adapted source
+files remain MPL-2.0. Exact licenses, notices, and MPL-covered source accompany
+the corresponding generated payloads.

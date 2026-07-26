@@ -30,5 +30,5 @@ Example:
 node scripts/verify-save-safety.mjs --save-dir "$env:APPDATA\Kinky Dungeon"
 ```
 
-Close the game before patch installation or removal. A normal mod ZIP never
-changes game files and is the preferred first test.
+Close the game before patch installation or removal. Ordinary mods remain
+outside the patcher's scope.

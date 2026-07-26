@@ -1,0 +1,143 @@
+name: Native manager
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  LZMA_SDK_SHA256: 2878c85f5f43a4a4e0952b1fd4e5fe097c1c143997a8047c7e1e788892aa9357
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@1.88.0
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: taiki-e/install-action@wasm-pack
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.8.3"
+          arch: win64_msvc2022_64
+          cache: true
+      - run: npm ci
+      - run: npm run build
+      - name: Configure native manager
+        run: cmake -S native/manager -B native/manager/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+      - name: Build and test
+        run: |
+          cmake --build native/manager/build
+          ctest --test-dir native/manager/build --output-on-failure
+      - name: Fetch pinned LZMA SDK installer module
+        shell: powershell
+        run: |
+          $archive = "$env:RUNNER_TEMP/lzma2602.7z"
+          Invoke-WebRequest `
+            -Uri "https://github.com/ip7z/7zip/releases/download/26.02/lzma2602.7z" `
+            -OutFile $archive
+          $actual = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne "${{ env.LZMA_SDK_SHA256 }}") {
+            throw "LZMA SDK archive hash mismatch: $actual"
+          }
+          7z x $archive "-o$env:RUNNER_TEMP/lzma-sdk" -y
+      - name: Package single-download EXE
+        shell: powershell
+        run: |
+          ./scripts/package-native-manager.ps1 `
+            -BuildDirectory native/manager/build `
+            -OutputDirectory native/manager/release `
+            -SfxModule "$env:RUNNER_TEMP/lzma-sdk/bin/7zSD.sfx"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kd-hybrid-manager-windows-x64
+          path: |
+            native/manager/release/KD-Hybrid-Manager-Windows-x64.exe
+            native/manager/release/KD-Hybrid-Manager-Windows-x64.exe.sha256
+
+  linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@1.88.0
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: taiki-e/install-action@wasm-pack
+      - name: Install Qt and AppImage dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build qt6-base-dev qt6-base-dev-tools libgl1-mesa-dev libfuse2t64
+      - run: npm ci
+      - run: npm run build
+      - name: Configure native manager
+        run: cmake -S native/manager -B native/manager/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+      - name: Build and test
+        run: |
+          cmake --build native/manager/build
+          ctest --test-dir native/manager/build --output-on-failure
+      - name: Fetch AppImage deployment tools
+        run: |
+          curl --fail --location --retry 3 \
+            --output linuxdeploy-${{ matrix.arch }}.AppImage \
+            https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-${{ matrix.arch }}.AppImage
+          curl --fail --location --retry 3 \
+            --output linuxdeploy-plugin-qt-${{ matrix.arch }}.AppImage \
+            https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-${{ matrix.arch }}.AppImage
+          chmod +x linuxdeploy-${{ matrix.arch }}.AppImage linuxdeploy-plugin-qt-${{ matrix.arch }}.AppImage
+      - name: Package AppImage
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: |
+          chmod +x scripts/package-native-manager-linux.sh
+          scripts/package-native-manager-linux.sh \
+            native/manager/build native/manager/release ${{ matrix.arch }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kd-hybrid-manager-linux-${{ matrix.arch }}
+          path: |
+            native/manager/release/KD-Hybrid-Manager-Linux-${{ matrix.arch }}.AppImage
+            native/manager/release/KD-Hybrid-Manager-Linux-${{ matrix.arch }}.AppImage.sha256
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: kd-hybrid-manager-*
+          path: release
+          merge-multiple: true
+      - name: Publish native manager assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --generate-notes \
+            --title "KD Hybrid ${GITHUB_REF_NAME}" \
+            release/*
