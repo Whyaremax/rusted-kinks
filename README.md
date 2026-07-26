@@ -74,6 +74,7 @@ It never reads or writes the KD save/profile directory.
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md),
 [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md),
 [docs/LOCAL_TESTING.md](docs/LOCAL_TESTING.md),
+[docs/DEVELOPER_HARNESS.md](docs/DEVELOPER_HARNESS.md),
 [docs/REMOTE_TESTING.md](docs/REMOTE_TESTING.md),
 [docs/PERFORMANCE.md](docs/PERFORMANCE.md), and
 [docs/SAFETY.md](docs/SAFETY.md) for implementation and validation details.

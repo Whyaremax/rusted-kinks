@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet("Setup", "Status", "Launch")]
+    [ValidateSet("Setup", "Status", "EnableDeveloper", "Launch")]
     [string]$Action = "Status",
     [string]$GameRoot,
     [string]$TestRoot
@@ -50,6 +50,7 @@ $testMain = Join-Path $testAppRoot "out\main.js"
 $cliPath = Join-Path $repoRoot "packages\tools\dist\cli.js"
 $payloadRoot = Join-Path $repoRoot "dist\bootstrap"
 $isolationMarker = "// KD Hybrid isolated test userData"
+$developerMarker = "// KD Hybrid developer test mode"
 
 $runtimeFiles = @(
     "KinkyDungeon.exe",
@@ -149,6 +150,29 @@ app.setPath('userData', KDHybridTestUserData)
     )
 }
 
+function Add-DeveloperTestMode {
+    $electronPath = Join-Path $testAppRoot "electron.js"
+    $text = [System.IO.File]::ReadAllText($electronPath)
+    if ($text.Contains($developerMarker)) {
+        return
+    }
+    $needle = "mainWindow.loadFile('index.html')"
+    if (-not $text.Contains($needle)) {
+        throw "Could not locate index.html loading in copied electron.js"
+    }
+    $replacement = @"
+$developerMarker
+	mainWindow.loadFile('index.html', { query: { test: 'kd-hybrid' } })
+	mainWindow.webContents.openDevTools({ mode: 'detach', activate: false })
+"@
+    $patched = $text.Replace($needle, $replacement.TrimEnd())
+    [System.IO.File]::WriteAllText(
+        $electronPath,
+        $patched,
+        [System.Text.UTF8Encoding]::new($false)
+    )
+}
+
 function Write-TestMarker {
     $metadata = [ordered]@{
         schema = 1
@@ -158,6 +182,7 @@ function Write-TestMarker {
         testUserData = $testUserData
         gameVersion = "5.4.92"
         packageVersion = "5.1.12"
+        developerTestMode = $true
         upstreamBundleSha256 = (Get-FileHash -LiteralPath $liveMain -Algorithm SHA256).Hash.ToLowerInvariant()
     }
     $json = $metadata | ConvertTo-Json -Depth 4
@@ -194,6 +219,7 @@ function Show-Status {
         state = if (
             $patcher.state -eq "installed" -and
             $electronText.Contains($isolationMarker) -and
+            $electronText.Contains($developerMarker) -and
             $liveHash -eq $testHash
         ) { "ready" } else { "invalid" }
         testRoot = $TestRoot
@@ -202,6 +228,7 @@ function Show-Status {
         realSaveDirectory = $realSave
         userDataIsolated = -not $testUserData.Equals($realSave, $comparison)
         isolationHookPresent = $electronText.Contains($isolationMarker)
+        developerTestMode = $electronText.Contains($developerMarker)
         liveAndTestBundleMatch = $liveHash -eq $testHash
         bundleSha256 = $testHash
         patcher = $patcher
@@ -255,6 +282,7 @@ function Setup-TestInstall {
     New-Item -ItemType Directory -Path $testMods -Force | Out-Null
 
     Add-UserDataIsolation
+    Add-DeveloperTestMode
     $node = (Get-Command node.exe -ErrorAction Stop).Source
     Invoke-Checked -FilePath $node -Arguments @(
         $cliPath,
@@ -266,6 +294,18 @@ function Setup-TestInstall {
         "--upstream-version",
         "5.4.92"
     )
+    Write-TestMarker
+    Show-Status
+}
+
+function Enable-DeveloperTestInstall {
+    if (-not (Test-Path -LiteralPath $markerPath -PathType Leaf)) {
+        throw "Test installation marker is missing; run npm run test:local:setup"
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $testAppRoot "electron.js") -PathType Leaf)) {
+        throw "Test electron.js is missing; run npm run test:local:setup"
+    }
+    Add-DeveloperTestMode
     Write-TestMarker
     Show-Status
 }
@@ -293,5 +333,6 @@ function Launch-TestInstall {
 switch ($Action) {
     "Setup" { Setup-TestInstall }
     "Status" { Show-Status }
+    "EnableDeveloper" { Enable-DeveloperTestInstall }
     "Launch" { Launch-TestInstall }
 }

@@ -42,6 +42,34 @@ Setup installs the signature-gated early bootstrap into the copied
 Electron package version 5.1.12, and the exact `out/main.js` hash. Unknown or
 modified bundles are refused.
 
+The isolated copy also loads `index.html?test=kd-hybrid`. This activates KD
+5.4.92's built-in developer mode and opens detached renderer DevTools. It is
+never applied to the live installation. On the in-game Restart screen, the
+developer panel provides enemy/item spawning, bind/defeat targeting, keys,
+vision, floor, stairs, parole, inventory, and restraint controls.
+
+The renderer console also exposes KD's own test functions:
+
+```javascript
+KDTestMapGen(10, [0], ["grv"])
+KDTestFullRunthrough(1, false, false)
+KDTestjailer(10)
+```
+
+`KDTestMapGen` repeatedly generates maps. `KDTestFullRunthrough` advances
+through floors and validates enemy/checkpoint state; start a disposable test
+run before using it. `KDTestjailer` samples jail-guard spawning. These functions
+mutate the current isolated session, so they must not be run in a normal save.
+See [DEVELOPER_HARNESS.md](DEVELOPER_HARNESS.md) for the complete map-generation,
+natural capture, prison escort, and native-adapter counter smoke route.
+
+For a test copy created before developer mode was added, enable it without
+recopying the game:
+
+```powershell
+npm run test:local:developer
+```
+
 Optional overrides are available when invoking the PowerShell script directly:
 
 ```powershell
