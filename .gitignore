@@ -13,9 +13,14 @@ artifacts/
 *.zip
 *.wasm
 *.wasm.map
+redistribution/releases/*
+!redistribution/releases/.gitkeep
 
 # Local upstream inspection (never redistribute KD code or assets)
 .local/
+aqtinstall.log
+native/manager/build/
+native/manager/release/
 upstream/
 vendor/
 game/

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
+import { createReadStream, existsSync } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
-import { relative, resolve } from "node:path";
+import { delimiter, join, relative, resolve } from "node:path";
 import { spawn } from "node:child_process";
 
 const args = process.argv.slice(2);
@@ -20,10 +20,30 @@ process.stdout.write(
   `Captured ${before.size} save files (aggregate ${beforeDigest.slice(0, 12)}…).\n`
 );
 
-const command = process.platform === "win32" ? "npm.cmd" : "npm";
+const npmExecutable = process.env.npm_node_execpath ?? process.execPath;
+const npmCli = process.env.npm_execpath;
+if (!npmCli) {
+  throw new Error(
+    "Could not locate npm's CLI. Run this verifier through npm run verify:safety."
+  );
+}
+const childEnvironment = { ...process.env };
+if (process.platform === "win32" && process.env.USERPROFILE) {
+  const cargoBin = join(process.env.USERPROFILE, ".cargo", "bin");
+  const pathEntries = (childEnvironment.PATH ?? "").split(delimiter);
+  if (
+    existsSync(join(cargoBin, "cargo.exe")) &&
+    !pathEntries.some(
+      (entry) => entry.toLowerCase() === cargoBin.toLowerCase()
+    )
+  ) {
+    childEnvironment.PATH = `${cargoBin}${delimiter}${childEnvironment.PATH ?? ""}`;
+  }
+}
 const code = await new Promise((resolveCode, reject) => {
-  const child = spawn(command, ["run", "check"], {
+  const child = spawn(npmExecutable, [npmCli, "run", "check"], {
     cwd: resolve(import.meta.dirname, ".."),
+    env: childEnvironment,
     stdio: "inherit",
     windowsHide: true
   });

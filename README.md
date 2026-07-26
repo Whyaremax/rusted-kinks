@@ -58,8 +58,10 @@ All patcher tests operate on generated fixtures.
 
 ## Installation model
 
-The normal distribution is a portable mod ZIP. An optional bootstrap patcher
-can inject the early asset controller for lower startup memory. The patcher:
+The end-user manager is deliberately only a bootstrap patcher. It does not
+install or manage ordinary KD mods; users keep using KD's own mod workflow for
+those. The patcher can inject the early asset controller for lower startup
+memory and:
 
 1. verifies the target layout and installed bundle signature;
 2. writes all KD Hybrid files under `resources/app/kd-hybrid`;
@@ -72,8 +74,14 @@ It never reads or writes the KD save/profile directory.
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md),
 [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md),
 [docs/LOCAL_TESTING.md](docs/LOCAL_TESTING.md),
+[docs/REMOTE_TESTING.md](docs/REMOTE_TESTING.md),
 [docs/PERFORMANCE.md](docs/PERFORMANCE.md), and
 [docs/SAFETY.md](docs/SAFETY.md) for implementation and validation details.
+
+The open-source native C++/Qt bootstrap manager lives under
+[`native/manager`](native/manager). A PowerShell fallback kit is generated with
+`npm run redistribute`; see [redistribution/README.md](redistribution/README.md).
+Normal mods remain under the game's existing mod workflow.
 
 ## Licensing and upstream credit
 

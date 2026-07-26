@@ -110,7 +110,7 @@ export async function install(options: InstallOptions): Promise<PatcherStatus> {
       requestedKnownBundle.bundleSha256 === bundleSha256);
   if (!known && options.allowUnknownBundle !== true) {
     throw new Error(
-      `Unknown out/main.js SHA-256 ${bundleSha256}; use a normal mod ZIP or explicitly allow an inert bootstrap`
+      `Unknown out/main.js SHA-256 ${bundleSha256}; this patcher only accepts verified game builds`
     );
   }
 
