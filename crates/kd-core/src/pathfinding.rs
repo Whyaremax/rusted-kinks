@@ -158,10 +158,20 @@ pub fn find_path(
 /// upstream API. Open-set insertion order, goal handling, the default
 /// heuristic, and diagonal turn penalties intentionally follow KD 5.4.92.
 #[must_use]
+pub fn find_grid_path(
+    grid: &Grid,
+    start: Position,
+    goal: Position,
+    max_visited: u32,
+    diagonal: bool,
+) -> PathResult {
+    find_grid_path_inner(grid, start, goal, max_visited, diagonal)
+}
+
 // Keeping the audited upstream control-flow correspondence in one function is
 // more valuable here than splitting the search loop across opaque helpers.
 #[allow(clippy::too_many_lines)]
-pub fn find_grid_path(
+fn find_grid_path_inner(
     grid: &Grid,
     start: Position,
     goal: Position,
@@ -171,7 +181,10 @@ pub fn find_grid_path(
     if start == goal {
         return PathResult::Found(vec![start]);
     }
-    if !grid.is_walkable(start) || !grid.is_walkable(goal) {
+    // KD inserts the source without checking its tile and accepts the target
+    // before checking the target tile. Keeping those two exceptions in the
+    // search lets the host reuse one immutable map snapshot across queries.
+    if grid.index(start).is_none() || grid.index(goal).is_none() {
         return PathResult::Unreachable { visited: 0 };
     }
     let len = grid.tiles().len();
@@ -406,5 +419,22 @@ mod tests {
         assert_eq!(path.first(), Some(&Position::new(0, 0)));
         assert_eq!(path.last(), Some(&Position::new(3, 3)));
         assert!(!path.contains(&Position::new(1, 1)));
+    }
+
+    #[test]
+    fn weighted_grid_path_accepts_blocked_source_and_target() {
+        let mut grid = Grid::new(5, 3).expect("grid");
+        grid.set_blocked(Position::new(0, 1), true)
+            .expect("blocked source");
+        grid.set_blocked(Position::new(4, 1), true)
+            .expect("blocked target");
+
+        let PathResult::Found(path) =
+            find_grid_path(&grid, Position::new(0, 1), Position::new(4, 1), 100, true)
+        else {
+            panic!("expected a path");
+        };
+        assert_eq!(path.first(), Some(&Position::new(0, 1)));
+        assert_eq!(path.last(), Some(&Position::new(4, 1)));
     }
 }

@@ -31,6 +31,13 @@ Launch the isolated copy:
 npm run test:local:launch
 ```
 
+Launch it with the loopback debugger used by the automated stress harness:
+
+```powershell
+npm run test:local:launch:debug
+npm run test:local:pathfinding
+```
+
 The copied `resources/app/electron.js` is test-only and calls
 `app.setPath("userData", ...)` before Electron becomes ready. The launcher also
 passes `--user-data-dir` as a second isolation layer. Consequently, launching

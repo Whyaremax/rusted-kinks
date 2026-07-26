@@ -182,23 +182,7 @@ impl Engine {
                     max_visited.min(1_000_000),
                     |position| self.world.is_occupied_except(position, entity),
                 );
-                Ok(match result {
-                    PathResult::Found(positions) => QueryResponse::Path {
-                        status: PathStatus::Found,
-                        visited: u32::try_from(positions.len()).unwrap_or(u32::MAX),
-                        positions,
-                    },
-                    PathResult::Unreachable { visited } => QueryResponse::Path {
-                        status: PathStatus::Unreachable,
-                        visited,
-                        positions: Vec::new(),
-                    },
-                    PathResult::BudgetExceeded { visited } => QueryResponse::Path {
-                        status: PathStatus::BudgetExceeded,
-                        visited,
-                        positions: Vec::new(),
-                    },
-                })
+                Ok(path_response(result))
             }
             Query::GridPath {
                 start,
@@ -213,23 +197,7 @@ impl Engine {
                     max_visited.min(1_000_000),
                     diagonal,
                 );
-                Ok(match result {
-                    PathResult::Found(positions) => QueryResponse::Path {
-                        status: PathStatus::Found,
-                        visited: u32::try_from(positions.len()).unwrap_or(u32::MAX),
-                        positions,
-                    },
-                    PathResult::Unreachable { visited } => QueryResponse::Path {
-                        status: PathStatus::Unreachable,
-                        visited,
-                        positions: Vec::new(),
-                    },
-                    PathResult::BudgetExceeded { visited } => QueryResponse::Path {
-                        status: PathStatus::BudgetExceeded,
-                        visited,
-                        positions: Vec::new(),
-                    },
-                })
+                Ok(path_response(result))
             }
             Query::Nearby { origin, radius } => Ok(QueryResponse::Entities(
                 self.spatial.in_radius(origin, radius.min(4_096)),
@@ -461,6 +429,26 @@ impl Engine {
             }
         }
         Ok(())
+    }
+}
+
+fn path_response(result: PathResult) -> QueryResponse {
+    match result {
+        PathResult::Found(positions) => QueryResponse::Path {
+            status: PathStatus::Found,
+            visited: u32::try_from(positions.len()).unwrap_or(u32::MAX),
+            positions,
+        },
+        PathResult::Unreachable { visited } => QueryResponse::Path {
+            status: PathStatus::Unreachable,
+            visited,
+            positions: Vec::new(),
+        },
+        PathResult::BudgetExceeded { visited } => QueryResponse::Path {
+            status: PathStatus::BudgetExceeded,
+            visited,
+            positions: Vec::new(),
+        },
     }
 }
 

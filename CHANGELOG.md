@@ -16,5 +16,10 @@
   the Electron package metadata version 5.1.12 and verify both independently.
 - Added a reproducible Windows test installation with a copied game runtime,
   dedicated Electron user data, live-file/save guards, and patcher status checks.
+- Preserved KD's path and suffix caches, reused native grid snapshots, added
+  generation-scoped negative caching, and optimized the no-hook facade path.
+- Added matched uncached, cache-cold, and cache-warm 120-enemy live benchmarks;
+  the optimized hybrid measured 2.049x, 1.466x, and 1.043x respectively with
+  exact route parity and zero failure.
 - Kept original KD Hybrid work under MIT while isolating KD-adapted files under
   MPL-2.0 and shipping attribution, licenses, and their exact source.

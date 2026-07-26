@@ -115,10 +115,7 @@ It is not evidence that every listed game subsystem has already been rewritten.
 Launch the isolated executable with a loopback-only Chromium debugging endpoint:
 
 ```powershell
-& "H:\...\kinkydungen-kd-hybrid-test\KinkyDungeon.exe" `
-  "--user-data-dir=H:\...\kinkydungen-kd-hybrid-test\user-data" `
-  "--remote-debugging-address=127.0.0.1" `
-  "--remote-debugging-port=9223"
+npm run test:local:launch:debug
 ```
 
 Then run:

@@ -32,6 +32,7 @@
     "test:local:status": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/local-test-install.ps1 -Action Status",
     "test:local:developer": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/local-test-install.ps1 -Action EnableDeveloper",
     "test:local:launch": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/local-test-install.ps1 -Action Launch",
+    "test:local:launch:debug": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/local-test-install.ps1 -Action Launch -RemoteDebuggingPort 9223",
     "test:local:pathfinding": "node scripts/stress-live-pathfinding.mjs --port 9223 --enemies 120",
     "test:remote": "node scripts/remote-test-server.mjs",
     "test:remote:smoke": "node scripts/smoke-remote-test-server.mjs"

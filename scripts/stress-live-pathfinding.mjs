@@ -154,6 +154,21 @@ async function runRendererStress(requestedEnemies) {
     fallbackCalls: after.fallbackCalls - before.fallbackCalls,
     failures: after.failures - before.failures
   });
+  const bridgeStatsCopy = () => {
+    const bridge = JSON.parse(KDHybrid.exportDiagnostics()).bridge;
+    return {
+      calls: bridge.calls,
+      failures: bridge.failures,
+      inputBytes: bridge.inputBytes,
+      outputBytes: bridge.outputBytes
+    };
+  };
+  const bridgeStatsDelta = (before, after) => ({
+    calls: after.calls - before.calls,
+    failures: after.failures - before.failures,
+    inputBytes: after.inputBytes - before.inputBytes,
+    outputBytes: after.outputBytes - before.outputBytes
+  });
   const clearPathCaches = () => {
     KDPathCache.clear();
     KDPathCacheIgnoreLocks.clear();
@@ -205,6 +220,7 @@ async function runRendererStress(requestedEnemies) {
       clearPathCaches();
     }
     const before = statusCopy();
+    const bridgeBefore = bridgeStatsCopy();
     const heapBefore = performance.memory?.usedJSHeapSize ?? null;
     const started = performance.now();
     const results = captureResults ? [] : null;
@@ -225,6 +241,7 @@ async function runRendererStress(requestedEnemies) {
     const elapsedMs = performance.now() - started;
     const heapAfter = performance.memory?.usedJSHeapSize ?? null;
     const after = statusCopy();
+    const bridgeAfter = bridgeStatsCopy();
     return {
       elapsedMs,
       elapsedMsPerBatch: elapsedMs / batches,
@@ -241,6 +258,9 @@ async function runRendererStress(requestedEnemies) {
       before,
       after,
       delta: statusDelta(before, after),
+      bridgeBefore,
+      bridgeAfter,
+      bridgeDelta: bridgeStatsDelta(bridgeBefore, bridgeAfter),
       results
     };
   };
@@ -389,14 +409,20 @@ async function runRendererStress(requestedEnemies) {
 
   KDHybrid.disableSystem("pathfinding", "stress-js-baseline");
   const jsUncached = timeBatch(queries, "each-call", true);
-  const jsCacheCold = timeBatch(queries, "each-batch", false);
+  const jsCacheCold = timeBatch(queries, "each-batch", true);
   const jsCacheWarm = timeBatch(queries, "none", false, timingBatches * 10);
 
   if (!KDHybrid.enableSystem("pathfinding")) {
     throw new Error("Could not restore native mode after JavaScript baseline");
   }
-  const nativeCold = timeBatch(queries, "start", true);
-  const nativeRepeat = timeBatch(queries, "none", false);
+  const nativeUncached = timeBatch(queries, "each-call", true);
+  const nativeCacheCold = timeBatch(queries, "each-batch", true);
+  const nativeCacheWarm = timeBatch(
+    queries,
+    "none",
+    false,
+    timingBatches * 10
+  );
 
   const parity = {
     compared: queries.length,
@@ -409,7 +435,7 @@ async function runRendererStress(requestedEnemies) {
   for (let index = 0; index < queries.length; index += 1) {
     const query = queries[index];
     const jsPath = jsUncached.results[index];
-    const nativePath = nativeCold.results[index];
+    const nativePath = nativeUncached.results[index];
     if (samePath(jsPath, nativePath)) {
       parity.exactMatches += 1;
     }
@@ -428,6 +454,38 @@ async function runRendererStress(requestedEnemies) {
     }
     if (!pathIsValid(nativePath, query.args)) {
       parity.invalidNativePaths += 1;
+    }
+  }
+  const cachedParity = {
+    compared: queries.length,
+    exactMatches: 0,
+    lengthMatches: 0,
+    reachabilityMismatches: 0,
+    invalidJavaScriptPaths: 0,
+    invalidNativePaths: 0
+  };
+  for (let index = 0; index < queries.length; index += 1) {
+    const query = queries[index];
+    const jsPath = jsCacheCold.results[index];
+    const nativePath = nativeCacheCold.results[index];
+    if (samePath(jsPath, nativePath)) {
+      cachedParity.exactMatches += 1;
+    }
+    if (
+      jsPath !== null &&
+      nativePath !== null &&
+      jsPath.length === nativePath.length
+    ) {
+      cachedParity.lengthMatches += 1;
+    }
+    if (!sameReachability(jsPath, nativePath)) {
+      cachedParity.reachabilityMismatches += 1;
+    }
+    if (!pathIsValid(jsPath, query.args)) {
+      cachedParity.invalidJavaScriptPaths += 1;
+    }
+    if (!pathIsValid(nativePath, query.args)) {
+      cachedParity.invalidNativePaths += 1;
     }
   }
 
@@ -770,12 +828,27 @@ async function runRendererStress(requestedEnemies) {
     developerFunctions.jailerSampler === "completed-without-throwing";
   const stressPassed =
     actualStressEnemies === requestedEnemies &&
-    nativeCold.delta.nativeCalls === requestedEnemies * timingBatches &&
-    nativeCold.delta.fallbackCalls === 0 &&
-    nativeCold.delta.failures === 0 &&
+    nativeUncached.delta.nativeCalls === requestedEnemies * timingBatches &&
+    nativeUncached.delta.fallbackCalls === 0 &&
+    nativeUncached.delta.failures === 0 &&
+    nativeCacheCold.delta.calls === requestedEnemies * timingBatches &&
+    nativeCacheCold.delta.nativeCalls +
+        nativeCacheCold.delta.fallbackCalls ===
+      requestedEnemies * timingBatches &&
+    nativeCacheCold.delta.failures === 0 &&
+    nativeCacheWarm.delta.calls ===
+      requestedEnemies * timingBatches * 10 &&
+    nativeCacheWarm.delta.nativeCalls +
+        nativeCacheWarm.delta.fallbackCalls ===
+      requestedEnemies * timingBatches * 10 &&
+    nativeCacheWarm.delta.failures === 0 &&
+    nativeCacheCold.bridgeDelta.calls < nativeUncached.bridgeDelta.calls &&
     parity.reachabilityMismatches === 0 &&
     parity.invalidJavaScriptPaths === 0 &&
-    parity.invalidNativePaths === 0;
+    parity.invalidNativePaths === 0 &&
+    cachedParity.reachabilityMismatches === 0 &&
+    cachedParity.invalidJavaScriptPaths === 0 &&
+    cachedParity.invalidNativePaths === 0;
   const passed =
     stressPassed &&
     expectedFallbackCasesPass &&
@@ -787,7 +860,7 @@ async function runRendererStress(requestedEnemies) {
     finalPathfinding.failures === initialPathfinding.failures;
 
   return {
-    schema: 1,
+    schema: 2,
     generatedAt: new Date().toISOString(),
     passed,
     environment: {
@@ -811,24 +884,26 @@ async function runRendererStress(requestedEnemies) {
       javascriptUncached: withoutResults(jsUncached),
       javascriptCacheCold: withoutResults(jsCacheCold),
       javascriptCacheWarm: withoutResults(jsCacheWarm),
-      nativeCold: withoutResults(nativeCold),
-      nativeRepeat: withoutResults(nativeRepeat),
+      nativeUncached: withoutResults(nativeUncached),
+      nativeCacheCold: withoutResults(nativeCacheCold),
+      nativeCacheWarm: withoutResults(nativeCacheWarm),
       speedup: {
         versusJavaScriptUncached: ratio(
           jsUncached,
-          nativeCold
+          nativeUncached
         ),
         versusJavaScriptCacheCold: ratio(
           jsCacheCold,
-          nativeCold
+          nativeCacheCold
         ),
         versusJavaScriptCacheWarm: ratio(
           jsCacheWarm,
-          nativeCold
+          nativeCacheWarm
         )
       }
     },
     parity,
+    cachedParity,
     argumentCompatibility,
     apiSurface,
     developerFunctions,

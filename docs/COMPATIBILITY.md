@@ -42,10 +42,13 @@ Initial facade candidates from 5.4.92 include
 ## Current integrated adapter
 
 Version 0.1 enables only `KinkyDungeonFindPath`, and only when the exact
-5.4.92 normalized source signature matches. Static map searches are encoded as
-one snapshot plus one weighted grid query. Enemy-aware searches, custom
-heuristics, long-distance trimming, pass-through-enemy rules, and leash-target
-rules use the captured official JavaScript function for that call.
+5.4.92 normalized source signature matches. Static map searches reuse one
+encoded snapshot for a KD path-cache generation. Exact suffix-cache hits return
+directly, the first full search uses the weighted native query, and
+cache-assisted misses use KD's official suffix-splicing search. Enemy-aware
+searches, custom heuristics, long-distance trimming, pass-through-enemy rules,
+and leash-target rules also use the captured official JavaScript function for
+that call.
 
 The remaining facade entries are compatibility metadata and roadmap targets;
 they are not presented as completed KD migrations.

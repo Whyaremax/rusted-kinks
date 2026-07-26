@@ -34,24 +34,28 @@ shapes intentionally fall back to the official JavaScript function.
 
 ## Live 120-enemy stress result
 
-On 2026-07-26, the isolated KD 5.4.92 Electron build generated a fresh 31 by 19
-graveyard map and placed 120 real `Maidforce` entities on distinct valid tiles.
-Each entity requested a path to the same player location.
+On 2026-07-26, the optimized adapter was tested inside the isolated KD 5.4.92
+Electron build on a fresh 31 by 19 map with 120 real `Maidforce` entities. Each
+entity requested a path to the same player location. Every comparison used the
+same queries and the same cache policy on both sides.
 
-| Path | Mean 120-enemy batch | Queries/second | Relative to native |
+| Cache policy | Official JavaScript | KD Hybrid | KD Hybrid speedup |
 | --- | ---: | ---: | ---: |
-| Official JavaScript, cache cleared before every query | 19.55 ms | 6,138 | JavaScript was 1.240x faster |
-| Official JavaScript, empty cache at batch start | 1.19 ms | 100,840 | JavaScript was 20.370x faster |
-| Official JavaScript, warm shared cache | 0.036 ms | 3,333,333 | JavaScript was 673.333x faster |
-| Rust/WASM native, first series | 24.24 ms | 4,950 | Baseline |
-| Rust/WASM native, repeated series | 24.66 ms | 4,866 | 1.017x slower than first native series |
+| Cleared before every query | 83.84 ms/batch | 40.92 ms/batch | 2.049x |
+| Empty at each 120-enemy batch start | 3.46 ms/batch | 2.36 ms/batch | 1.466x |
+| Warm shared cache | 0.073 ms/batch | 0.070 ms/batch | 1.043x |
+
+The cache-cold hybrid series handled 1,200 facade calls with only 20 native
+bridge operations: one snapshot load and one native seed search per batch.
+Direct cache hits stayed in the facade, while cache-assisted misses used KD's
+official suffix-splicing search. The warm series issued zero bridge calls.
 
 Compatibility checks passed:
 
-- 120 of 120 JavaScript/native results matched exactly;
+- 120 of 120 uncached results matched exactly;
+- 120 of 120 cache-cold results matched exactly;
 - every returned JavaScript and native path was valid;
-- the timed native series handled all 1,200 calls natively with zero fallback
-  and zero failure;
+- every timed series completed with zero native failure;
 - all 19 `KinkyDungeonFindPath` parameters were exercised;
 - unsupported enemy-aware, trimmed, custom-heuristic, passable-enemy, and leash
   calls fell back for one call and exactly matched the official function;
@@ -60,13 +64,13 @@ Compatibility checks passed:
   validation; and
 - KD's built-in map-generation, full-runthrough, and jailer tests completed.
 
-The result exposes an important integration bottleneck: native search is about
-24% slower than uncached upstream JavaScript on this real map, while the
-current facade also bypasses KD's very effective shared path cache.
-Consequently, the current native adapter is a substantial performance
-regression for the common many-enemies-to-one-target pattern. A production
-optimization should preserve or replace upstream suffix caching and avoid
-rebuilding/loading the whole grid snapshot for every query.
+This replaces the earlier integration result where the adapter bypassed KD's
+cache and rebuilt the grid for every enemy. The fix preserves KD's cache maps
+and invalidation generation, reuses one immutable native grid, caches
+unreachable results for that generation, and removes hook bookkeeping from the
+no-hook fast path. Cache-assisted misses deliberately use the captured official
+function because its partial suffix splice is faster than serializing a cache
+frontier across WASM.
 
 Host: Intel Core i7-12700KF, NVIDIA RTX 4070 Ti, 128 GiB RAM, Windows 11, and
 Electron from KD 5.4.92. Reproduce the test with:

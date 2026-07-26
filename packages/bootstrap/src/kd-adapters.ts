@@ -32,6 +32,13 @@ declare const KDEffectTileTagsLoc:
   | undefined;
 declare const KinkyDungeonPlayerEntity: Position | undefined;
 declare const KDOpenDoorTiles: readonly unknown[] | undefined;
+declare const KinkyDungeonMovableTilesSmartEnemy: string | undefined;
+declare const KinkyDungeonMovableTilesEnemy: string | undefined;
+declare const KinkyDungeonGroundTiles: string | undefined;
+declare let KDPathCache: KDPathCacheLike | undefined;
+declare let KDPathCacheIgnoreLocks: KDPathCacheLike | undefined;
+declare let KDPathfindingCacheHits: number | undefined;
+declare let KDPathfindingCacheFails: number | undefined;
 
 interface KDMapTile {
   readonly Lock?: unknown;
@@ -52,12 +59,24 @@ export interface EffectTileTags {
   readonly danger?: unknown;
 }
 
+export interface KDPathCacheLike {
+  readonly size: number;
+  has(key: string): boolean;
+  get(key: string): readonly Position[] | undefined;
+  set(key: string, path: readonly Position[]): unknown;
+  delete(key: string): boolean;
+}
+
 export interface KDPathfindingEnvironment {
   mapData(): KDMapDataLike | undefined;
   visionAt(x: number, y: number): number | undefined;
   effectTagsAt(location: string): EffectTileTags | undefined;
   playerPosition(): Position | undefined;
   openDoorTiles(): readonly unknown[] | undefined;
+  pathCache?(ignoreLocks: boolean): KDPathCacheLike | undefined;
+  tileShort?(movableTiles: string): string;
+  recordCacheHit?(): void;
+  recordCacheFill?(): void;
 }
 
 type NativePathBridge = Pick<WasmBatchBridge, "loadSnapshot" | "query">;
@@ -77,23 +96,66 @@ export function createKinkyDungeonPathfindingHandler(
   bridge: NativePathBridge,
   environment: KDPathfindingEnvironment = browserEnvironment
 ): (...args: unknown[]) => AdapterResult {
+  const cacheStates = new WeakMap<object, CacheState>();
+  let loadedGrid: LoadedGrid | null = null;
+
   return (...args: unknown[]): AdapterResult => {
-    const start = integerPosition(args[0], args[1]);
-    const goal = integerPosition(args[2], args[3]);
+    const startX = integerCoordinate(args[0]);
+    const startY = integerCoordinate(args[1]);
+    const goalX = integerCoordinate(args[2]);
+    const goalY = integerCoordinate(args[3]);
     const movableTiles = args[7];
-    if (start === null || goal === null || typeof movableTiles !== "string") {
+    if (
+      startX === null ||
+      startY === null ||
+      goalX === null ||
+      goalY === null ||
+      typeof movableTiles !== "string"
+    ) {
       return useJavaScriptFallback();
+    }
+
+    const blockEnemy = Boolean(args[4]);
+    const blockPlayer = Boolean(args[5]);
+    const ignoreLocks = Boolean(args[6]);
+    const requireLight = Boolean(args[8]);
+    const noDoors = Boolean(args[9]);
+    const needDoorMemory = Boolean(args[10]);
+    const cacheEligible =
+      !blockEnemy &&
+      !blockPlayer &&
+      !requireLight &&
+      !noDoors &&
+      !needDoorMemory;
+    const tileShort = environment.tileShort?.(movableTiles) ?? movableTiles;
+    const pathCache = cacheEligible
+      ? environment.pathCache?.(ignoreLocks)
+      : undefined;
+    const cacheKey = `${startX},${startY},${goalX},${goalY},${tileShort}`;
+    const cached = pathCache?.get(cacheKey);
+    if (cached !== undefined) {
+      environment.recordCacheHit?.();
+      const first = cached[0];
+      if (
+        first !== undefined &&
+        Math.max(
+          Math.abs(first.x - startX),
+          Math.abs(first.y - startY)
+        ) < 1.5
+      ) {
+        return cached.slice();
+      }
+      pathCache?.delete(cacheKey);
     }
 
     // The upstream function returns the target directly for the same or an
     // adjacent square, before performing a graph search.
     if (
-      Math.max(Math.abs(start.x - goal.x), Math.abs(start.y - goal.y)) <= 1
+      Math.max(Math.abs(startX - goalX), Math.abs(startY - goalY)) <= 1
     ) {
-      return [{ x: goal.x, y: goal.y }];
+      return [{ x: goalX, y: goalY }];
     }
 
-    const blockEnemy = Boolean(args[4]);
     const enemy = args[11];
     const trimLongDistance = Boolean(args[12]);
     const heuristicOverride = args[13];
@@ -110,35 +172,92 @@ export function createKinkyDungeonPathfindingHandler(
       return useJavaScriptFallback();
     }
 
+    const cacheEpoch =
+      pathCache === undefined
+        ? -1
+        : observeCache(cacheStates, pathCache);
+    const start = { x: startX, y: startY };
+    const goal = { x: goalX, y: goalY };
     const map = environment.mapData();
     if (map === undefined || !validMap(map) || !inMap(map, start) || !inMap(map, goal)) {
       return useJavaScriptFallback();
     }
 
-    const tiles = encodeKinkyDungeonGrid(map, start, goal, movableTiles, {
-      blockPlayer: Boolean(args[5]),
-      ignoreLocks: Boolean(args[6]),
-      requireLight: Boolean(args[8]),
-      noDoors: Boolean(args[9]),
-      needDoorMemory: Boolean(args[10]),
+    const gridOptions = {
+      blockPlayer,
+      ignoreLocks,
+      requireLight,
+      noDoors,
+      needDoorMemory,
       ignoreTrafficLaws: Boolean(args[15]),
       ignoreAllWeighting: Boolean(args[17])
-    }, environment);
-    if (tiles === null) {
-      return useJavaScriptFallback();
+    };
+    const canReuseGrid = pathCache !== undefined;
+    const unreachableKey = `${cacheKey},${Number(Boolean(args[14]))}`;
+    let tiles: Uint8Array;
+    if (
+      canReuseGrid &&
+      loadedGrid !== null &&
+      sameLoadedGrid(
+        loadedGrid,
+        map,
+        movableTiles,
+        gridOptions,
+        pathCache,
+        cacheEpoch
+      )
+    ) {
+      tiles = loadedGrid.tiles;
+      if (loadedGrid.unreachableKeys.has(unreachableKey)) {
+        return undefined;
+      }
+    } else {
+      const encoded = encodeKinkyDungeonGrid(
+        map,
+        movableTiles,
+        gridOptions,
+        environment
+      );
+      if (encoded === null) {
+        return useJavaScriptFallback();
+      }
+      tiles = encoded;
+      bridge.loadSnapshot(
+        encodeSnapshot({
+          width: map.GridWidth,
+          height: map.GridHeight,
+          turn: 0n,
+          seed: 0n,
+          tiles,
+          entities: [],
+          buffs: []
+        })
+      );
+      loadedGrid = canReuseGrid
+        ? {
+            map,
+            grid: map.Grid,
+            mapTiles: map.Tiles,
+            traffic: map.Traffic,
+            movableTiles,
+            options: gridOptions,
+            cache: pathCache,
+            cacheEpoch,
+            tiles,
+            unreachableKeys: new Set()
+          }
+        : null;
     }
 
-    bridge.loadSnapshot(
-      encodeSnapshot({
-        width: map.GridWidth,
-        height: map.GridHeight,
-        turn: 0n,
-        seed: 0n,
-        tiles,
-        entities: [],
-        buffs: []
-      })
-    );
+    if (
+      pathCache !== undefined &&
+      hasIndexedCachePath(cacheStates, pathCache, goal, tileShort)
+    ) {
+      // KD's official search can splice an existing suffix from any expanded
+      // node. That partial-cache path is faster than serializing the whole
+      // frontier into WASM, so preserve it as a one-call hybrid fallback.
+      return useJavaScriptFallback();
+    }
     const response = decodeQueryResponse(
       bridge.query(
         encodeQuery({
@@ -154,10 +273,33 @@ export function createKinkyDungeonPathfindingHandler(
       throw new TypeError("Native grid path returned a non-path response");
     }
     if (response.status !== "found") {
+      if (
+        response.status === "unreachable" &&
+        canReuseGrid &&
+        loadedGrid !== null
+      ) {
+        loadedGrid.unreachableKeys.add(unreachableKey);
+      }
       return undefined;
     }
     validatePath(response.positions, start, goal, tiles, map.GridWidth, !Boolean(args[14]));
-    return response.positions.slice(1).map(({ x, y }) => ({ x, y }));
+    const result = response.positions
+      .slice(1)
+      .map(({ x, y }) => ({ x, y }));
+    if (pathCache !== undefined && !pathCache.has(cacheKey)) {
+      setPathCache(pathCache, result, goal, tileShort, cacheKey);
+      indexCachedPath(
+        cacheStates,
+        pathCache,
+        start,
+        result,
+        goal,
+        tileShort
+      );
+      synchronizeCache(cacheStates, pathCache);
+    }
+    environment.recordCacheFill?.();
+    return result;
   };
 }
 
@@ -202,10 +344,27 @@ interface GridOptions {
   readonly ignoreAllWeighting: boolean;
 }
 
+interface CacheState {
+  size: number;
+  epoch: number;
+  readonly indexedPaths: Map<string, Map<string, Position>>;
+}
+
+interface LoadedGrid {
+  readonly map: KDMapDataLike;
+  readonly grid: string;
+  readonly mapTiles: KDMapDataLike["Tiles"];
+  readonly traffic: KDMapDataLike["Traffic"];
+  readonly movableTiles: string;
+  readonly options: GridOptions;
+  readonly cache: KDPathCacheLike;
+  readonly cacheEpoch: number;
+  readonly tiles: Uint8Array;
+  readonly unreachableKeys: Set<string>;
+}
+
 function encodeKinkyDungeonGrid(
   map: KDMapDataLike,
-  start: Position,
-  goal: Position,
   movableTiles: string,
   options: GridOptions,
   environment: KDPathfindingEnvironment
@@ -269,11 +428,139 @@ function encodeKinkyDungeonGrid(
       output[index] = weight << 1;
     }
   }
-
-  // KD accepts the source and target independently of their map tile.
-  output[start.x + start.y * map.GridWidth] = 0;
-  output[goal.x + goal.y * map.GridWidth] = 0;
   return output;
+}
+
+function observeCache(
+  states: WeakMap<object, CacheState>,
+  cache: KDPathCacheLike
+): number {
+  const key = cache as object;
+  const current = states.get(key);
+  if (current === undefined) {
+    states.set(key, {
+      size: cache.size,
+      epoch: 0,
+      indexedPaths: new Map()
+    });
+    return 0;
+  }
+  if (cache.size < current.size) {
+    current.epoch += 1;
+    current.indexedPaths.clear();
+  }
+  current.size = cache.size;
+  return current.epoch;
+}
+
+function synchronizeCache(
+  states: WeakMap<object, CacheState>,
+  cache: KDPathCacheLike
+): void {
+  const current = states.get(cache as object);
+  if (current === undefined) {
+    states.set(cache as object, {
+      size: cache.size,
+      epoch: 0,
+      indexedPaths: new Map()
+    });
+  } else {
+    current.size = cache.size;
+  }
+}
+
+function hasIndexedCachePath(
+  states: WeakMap<object, CacheState>,
+  cache: KDPathCacheLike,
+  goal: Position,
+  tileShort: string
+): boolean {
+  const state = states.get(cache as object);
+  if (state === undefined) {
+    return false;
+  }
+  return (
+    (state.indexedPaths.get(cacheGroupKey(goal, tileShort))?.size ?? 0) > 0
+  );
+}
+
+function indexCachedPath(
+  states: WeakMap<object, CacheState>,
+  cache: KDPathCacheLike,
+  start: Position,
+  path: readonly Position[],
+  goal: Position,
+  tileShort: string
+): void {
+  const state = states.get(cache as object);
+  if (state === undefined) {
+    return;
+  }
+  const groupKey = cacheGroupKey(goal, tileShort);
+  let indexed = state.indexedPaths.get(groupKey);
+  if (indexed === undefined) {
+    indexed = new Map();
+    state.indexedPaths.set(groupKey, indexed);
+  }
+  for (const position of [start, ...path.slice(0, -1)]) {
+    indexed.set(`${position.x},${position.y}`, position);
+  }
+}
+
+function cacheGroupKey(goal: Position, tileShort: string): string {
+  return `${goal.x},${goal.y},${tileShort}`;
+}
+
+function sameLoadedGrid(
+  loaded: LoadedGrid,
+  map: KDMapDataLike,
+  movableTiles: string,
+  options: GridOptions,
+  cache: KDPathCacheLike,
+  cacheEpoch: number
+): boolean {
+  return (
+    loaded.map === map &&
+    loaded.grid === map.Grid &&
+    loaded.mapTiles === map.Tiles &&
+    loaded.traffic === map.Traffic &&
+    loaded.movableTiles === movableTiles &&
+    loaded.cache === cache &&
+    loaded.cacheEpoch === cacheEpoch &&
+    sameGridOptions(loaded.options, options)
+  );
+}
+
+function sameGridOptions(left: GridOptions, right: GridOptions): boolean {
+  return (
+    left.blockPlayer === right.blockPlayer &&
+    left.ignoreLocks === right.ignoreLocks &&
+    left.requireLight === right.requireLight &&
+    left.noDoors === right.noDoors &&
+    left.needDoorMemory === right.needDoorMemory &&
+    left.ignoreTrafficLaws === right.ignoreTrafficLaws &&
+    left.ignoreAllWeighting === right.ignoreAllWeighting
+  );
+}
+
+function setPathCache(
+  cache: KDPathCacheLike,
+  path: readonly Position[],
+  goal: Position,
+  tileShort: string,
+  finalKey: string
+): void {
+  for (let index = 0; index < path.length - 1; index += 1) {
+    const suffix = path.slice(index);
+    const first = suffix[0];
+    if (first !== undefined) {
+      cache.set(
+        `${first.x},${first.y},${goal.x},${goal.y},${tileShort}`,
+        suffix.slice(1)
+      );
+    }
+  }
+  cache.set(finalKey, path.slice());
 }
 
 function movementWeight(
@@ -362,22 +649,21 @@ function validatePath(
       throw new RangeError("Native grid path contains a non-adjacent step");
     }
     const tile = tiles[current.x + current.y * width];
-    if (tile === undefined || (tile & 1) !== 0) {
+    if (
+      tile === undefined ||
+      ((tile & 1) !== 0 && !samePosition(current, goal))
+    ) {
       throw new RangeError("Native grid path crosses a blocked tile");
     }
   }
 }
 
-function integerPosition(x: unknown, y: unknown): Position | null {
-  return typeof x === "number" &&
-    typeof y === "number" &&
-    Number.isSafeInteger(x) &&
-    Number.isSafeInteger(y) &&
-    x >= -0x8000 &&
-    x <= 0x7fff &&
-    y >= -0x8000 &&
-    y <= 0x7fff
-    ? { x, y }
+function integerCoordinate(value: unknown): number | null {
+  return typeof value === "number" &&
+    Number.isSafeInteger(value) &&
+    value >= -0x8000 &&
+    value <= 0x7fff
+    ? value
     : null;
 }
 
@@ -432,6 +718,87 @@ function readBinding<T>(
   return (globalThis as Record<string, unknown>)[globalName] as T | undefined;
 }
 
+let browserTileAliases:
+  | {
+      readonly smartEnemy: string | undefined;
+      readonly enemy: string | undefined;
+      readonly ground: string | undefined;
+    }
+  | undefined;
+
+function browserTileShort(movableTiles: string): string {
+  browserTileAliases ??= {
+    smartEnemy: readBinding(
+      () => KinkyDungeonMovableTilesSmartEnemy,
+      "KinkyDungeonMovableTilesSmartEnemy"
+    ),
+    enemy: readBinding(
+      () => KinkyDungeonMovableTilesEnemy,
+      "KinkyDungeonMovableTilesEnemy"
+    ),
+    ground: readBinding(
+      () => KinkyDungeonGroundTiles,
+      "KinkyDungeonGroundTiles"
+    )
+  };
+  if (movableTiles === browserTileAliases.smartEnemy) {
+    return "TSE";
+  }
+  if (movableTiles === browserTileAliases.enemy) {
+    return "TE";
+  }
+  if (movableTiles === browserTileAliases.ground) {
+    return "TG";
+  }
+  return movableTiles;
+}
+
+function browserPathCache(ignoreLocks: boolean): KDPathCacheLike | undefined {
+  try {
+    const cache = ignoreLocks ? KDPathCacheIgnoreLocks : KDPathCache;
+    if (cache !== undefined) {
+      return cache;
+    }
+  } catch {
+    // Fall through for loaders that expose KD state as global properties.
+  }
+  return (globalThis as Record<string, unknown>)[
+    ignoreLocks ? "KDPathCacheIgnoreLocks" : "KDPathCache"
+  ] as KDPathCacheLike | undefined;
+}
+
+function browserRecordCacheHit(): void {
+  try {
+    if (typeof KDPathfindingCacheHits === "number") {
+      KDPathfindingCacheHits += 1;
+      return;
+    }
+  } catch {
+    // Fall through for loaders that expose KD state as global properties.
+  }
+  incrementGlobalNumber("KDPathfindingCacheHits");
+}
+
+function browserRecordCacheFill(): void {
+  try {
+    if (typeof KDPathfindingCacheFails === "number") {
+      KDPathfindingCacheFails += 1;
+      return;
+    }
+  } catch {
+    // Fall through for loaders that expose KD state as global properties.
+  }
+  incrementGlobalNumber("KDPathfindingCacheFails");
+}
+
+function incrementGlobalNumber(globalName: string): void {
+  const target = globalThis as Record<string, unknown>;
+  const value = target[globalName];
+  if (typeof value === "number") {
+    target[globalName] = value + 1;
+  }
+}
+
 const browserEnvironment: KDPathfindingEnvironment = Object.freeze({
   mapData: () => readBinding(() => KDMapData, "KDMapData"),
   visionAt: (x: number, y: number) => {
@@ -452,5 +819,9 @@ const browserEnvironment: KDPathfindingEnvironment = Object.freeze({
   },
   playerPosition: () =>
     readBinding(() => KinkyDungeonPlayerEntity, "KinkyDungeonPlayerEntity"),
-  openDoorTiles: () => readBinding(() => KDOpenDoorTiles, "KDOpenDoorTiles")
+  openDoorTiles: () => readBinding(() => KDOpenDoorTiles, "KDOpenDoorTiles"),
+  pathCache: browserPathCache,
+  tileShort: browserTileShort,
+  recordCacheHit: browserRecordCacheHit,
+  recordCacheFill: browserRecordCacheFill
 });

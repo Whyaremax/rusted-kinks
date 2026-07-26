@@ -3,7 +3,9 @@ param(
     [ValidateSet("Setup", "Status", "EnableDeveloper", "Launch")]
     [string]$Action = "Status",
     [string]$GameRoot,
-    [string]$TestRoot
+    [string]$TestRoot,
+    [ValidateRange(0, 65535)]
+    [int]$RemoteDebuggingPort = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -323,11 +325,18 @@ function Launch-TestInstall {
         return
     }
     New-Item -ItemType Directory -Path $testUserData -Force | Out-Null
-    Start-Process -FilePath $testExecutable -WorkingDirectory $TestRoot -ArgumentList @(
+    $arguments = @(
         "--user-data-dir=$testUserData"
     )
+    if ($RemoteDebuggingPort -gt 0) {
+        $arguments += "--remote-debugging-port=$RemoteDebuggingPort"
+    }
+    Start-Process -FilePath $testExecutable -WorkingDirectory $TestRoot -ArgumentList $arguments
     Write-Output "Started isolated test installation: $testExecutable"
     Write-Output "Dedicated user data: $testUserData"
+    if ($RemoteDebuggingPort -gt 0) {
+        Write-Output "Local debugger endpoint: 127.0.0.1:$RemoteDebuggingPort"
+    }
 }
 
 switch ($Action) {

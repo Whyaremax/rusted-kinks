@@ -264,6 +264,28 @@ export class LegacySystemDispatcher {
       return Reflect.apply(fallback, this.#target, args);
     }
 
+    if (this.#hooks.size === 0) {
+      try {
+        const nativeResult = Reflect.apply(
+          entry.native,
+          this.#target,
+          args
+        );
+        if (isNativeFallbackRequest(nativeResult)) {
+          entry.status.fallbackCalls += 1;
+          return Reflect.apply(fallback, this.#target, args);
+        }
+        entry.status.nativeCalls += 1;
+        return nativeResult;
+      } catch {
+        entry.status.failures += 1;
+        entry.status.mode = "js-fallback";
+        entry.status.reason = "native-exception";
+        entry.status.fallbackCalls += 1;
+        return Reflect.apply(fallback, this.#target, args);
+      }
+    }
+
     const context: HookContext = {
       system: entry.system,
       args: [...args],
