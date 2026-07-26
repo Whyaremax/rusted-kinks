@@ -35,9 +35,9 @@ crates/kd-core       Pure Rust simulation core and binary protocol
 crates/kd-wasm       Small wasm-bindgen boundary
 packages/runtime     JavaScript SDK, dispatcher, bridge, assets, diagnostics
 packages/bootstrap   Early and normal-mod bootstrap entrypoint
-packages/tools       Reversible patcher and distribution packager
+packages/tools       Patcher and distribution packager
 scripts              Build and save-safety verification helpers
-docs                 Architecture, compatibility, safety, and release notes
+docs                 self explanatory
 ```
 
 ## Development
