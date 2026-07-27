@@ -1,22 +1,23 @@
 # Rusted Kinks (KD Hybrid)
 
 Rusted Kinks started as a toilet thought: Kinky Dungeon is fun, but some of its
-JavaScript hot paths could be a whole lot faster.
+JavaScript hot paths work much harder than they need to.
 
-The plan is to move the expensive parts into Rust/WebAssembly while keeping the
-Electron/Pixi interface, original JavaScript behavior, and modding scene intact.
-Keep the original kink; just make it run better. If Doom can run on a pregnancy
-test, KD can have a Rust fast path.
+The idea is simple: move expensive, repeatable work into Rust/WebAssembly while
+keeping the Electron/Pixi interface, original JavaScript behavior, and modding
+scene intact. Keep the original kink; just make it run better. If Doom can run
+on a pregnancy test, KD can have a Rust fast path.
 
-This is a hybrid project, not an attempt to throw the whole game away and
-rewrite everything overnight. The fast path handles work it understands. The
-original JavaScript takes over whenever the game updates, a mod replaces a
-function, or a call is outside the native adapter's comfort zone.
+It stays hybrid on purpose. The fast path handles work it understands, and the
+original JavaScript takes over when a mod replaces a function, KD updates, or a
+call does not fit the native adapter. That keeps normal JavaScript mods useful
+while letting the expensive parts move somewhere faster.
 
 ## Where it is now
 
-This is still an early alpha. Most of it is a work in progress, so do not expect
-a life-changing FPS boost just yet.
+This is early alpha, but it is not vaporware. The build, patching, fallback,
+testing, and remote-play pipelines are alive; pathfinding is the first
+optimization enabled on `main`.
 
 What exists today:
 
@@ -27,21 +28,25 @@ What exists today:
 - an isolated developer installation that does not share the normal save
   directory;
 - compatibility fallbacks for calls the native path cannot safely handle; and
-- stress tests against the real KD Electron build.
+- stress tests against the real KD Electron build;
+- a private remote-browser test server with tokenized access and a
+  download-once asset cache; and
+- a capability-gated WASM plugin host ready for the mod SDK to grow into.
 
-The current `main` branch only switches on the pathfinding adapter. In a focused
-KD 5.4.92 benchmark, it ran the tested path 1.824x as fast as the original
-function with the same result. That is a pathfinding result, not a promise that
-the whole game is suddenly 1.824x faster. The numbers and reproduction command
-are in [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
+In a focused KD 5.4.92 benchmark, the pathfinding adapter ran the tested path
+1.824x as fast as the original function and returned the same result. That
+number covers the pathfinder. Broader turn and frame gains will grow as more
+hot paths earn a place on `main`. The numbers and reproduction command are in
+[docs/PERFORMANCE.md](docs/PERFORMANCE.md).
 
 Movement, broader AI, combat, statuses, map generation, and asset handling come
 later, one measured slice at a time.
 
 ## Installing a release
 
-If the [Releases](https://github.com/Whyaremax/rusted-kinks/releases) page has a
-manager or setup archive, that is the easy route:
+Want the shortest route? Check
+[Releases](https://github.com/Whyaremax/rusted-kinks/releases). If there is a
+manager or setup archive:
 
 1. Download the latest setup archive or manager.
 2. Close Kinky Dungeon.
@@ -49,10 +54,11 @@ manager or setup archive, that is the easy route:
 4. Install the bootstrap and launch the game normally.
 
 Voilà. The manager checks the game build, backs up the file it changes, and can
-remove the patch later. It does not include Kinky Dungeon itself or manage
-ordinary mods.
+remove the patch later. It does not include Kinky Dungeon itself or take over
+ordinary mod management.
 
-If Releases is empty or behind the source, build the installer kit yourself:
+If the Releases page is empty or behind the source, build the installer kit
+yourself.
 
 ## Building and installing from source
 
@@ -60,7 +66,7 @@ You need:
 
 - Git;
 - Node.js 22 or newer and npm 10 or newer;
-- Rust 1.88 or newer;
+- [rustup](https://rustup.rs/) (the repository selects Rust 1.88);
 - the `wasm32-unknown-unknown` Rust target; and
 - `wasm-pack`.
 
@@ -81,20 +87,31 @@ npm run redistribute
 `cargo install wasm-pack --locked` is a one-time setup step; skip it if
 `wasm-pack --version` already works.
 
-The build creates a setup ZIP and an unpacked kit under
-`redistribution/releases/`. To install from the unpacked kit:
+Here is what the useful commands make:
+
+| Command | Result |
+| --- | --- |
+| `npm run check` | TypeScript tests, Rust tests, and type checking |
+| `npm run build` | The Rust/WASM core and JavaScript bootstrap under `dist/` |
+| `npm run package` | A portable bootstrap ZIP at `artifacts/kd-hybrid.zip` |
+| `npm run redistribute` | An unpacked patcher kit, setup ZIP, and checksums under `redistribution/releases/` |
+
+To install from the unpacked kit:
 
 ```powershell
 $patcher = Get-ChildItem .\redistribution\releases `
   -Filter KDHybrid-Patcher.ps1 -Recurse |
   Select-Object -First 1
 
-& $patcher.FullName -Action Install
+& $patcher.FullName `
+  -Action Install `
+  -GameRoot "C:\Path\To\Kinky Dungeon"
 ```
 
-The patcher asks for the game path, checks the installed KD signature, and
-installs the bootstrap. Pass `-Action Status` to check it or `-Action Uninstall`
-to put the original file back.
+`GameRoot` can be either the folder containing the game executable or its
+`resources/app` folder. Leave it out if you would rather have the patcher ask.
+Use `-Action Status` to check the installation or `-Action Uninstall` to put the
+original file back.
 
 If you only want the portable bootstrap payload for development, run
 `npm run package`; it writes `artifacts/kd-hybrid.zip`.
@@ -109,11 +126,28 @@ cmake --build native/manager/build --config Release
 ctest --test-dir native/manager/build -C Release --output-on-failure
 ```
 
-The Rust/WASM and JavaScript parts build on Windows and Linux. Ready-made Linux
-manager packages are still on the roadmap, so Linux installation is currently
-for people comfortable building the Qt manager from source.
+The Rust/WASM and JavaScript parts build on Windows and Linux. On
+Debian/Ubuntu, the GUI manager can be built with:
+
+```bash
+sudo apt install cmake ninja-build qt6-base-dev qt6-base-dev-tools libgl1-mesa-dev
+npm ci
+npm run build
+cmake -S native/manager -B native/manager/build \
+  -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+cmake --build native/manager/build
+ctest --test-dir native/manager/build --output-on-failure
+```
+
+The executable lands at `native/manager/build/KDHybridManager`. Ready-made
+Linux packages will appear on Releases once tagged builds begin.
 
 ## Quick answers
+
+### Does this include Kinky Dungeon?
+
+No. Bring your own copy from the official game page. Rusted Kinks only ships
+the performance layer, patcher, tests, and their source.
 
 ### Will normal KD mods still work?
 
@@ -149,10 +183,17 @@ back on.
 
 ### What kind of speedup should I expect?
 
-Right now, the honest answer is “it depends on how much time your game spends
-pathfinding.” The project measures each migrated system against the original
-function and keeps it only when it is both compatible and faster. Broader turn,
-frame-time, startup, and memory improvements are roadmap work.
+It depends on where a particular run spends its time. Today, `main` has a
+measured pathfinding win. Crowded turns, frame time, startup, and memory are the
+next places to collect gains. Each fast path is compared with the original
+function, and slower ideas get left in the lab.
+
+### Can I test it from another computer or phone?
+
+Yes. The isolated test copy has a tokenized browser server and a persistent
+asset cache, so a slow connection pays most of the download cost once. See
+[Remote browser testing](docs/REMOTE_TESTING.md) for the launch command and
+private-network setup.
 
 ### How do I remove it?
 
@@ -166,10 +207,11 @@ The short version:
 
 1. keep pathfinding genuinely faster and boringly reliable;
 2. migrate movement, AI, combat, buffs, and event batching in useful slices;
-3. improve map generation and asset loading;
-4. make the mod SDK pleasant enough that other people can extend the native
+3. build capture, prison, map-generation, and long-run fixtures;
+4. improve startup, asset loading, and remote-play caching;
+5. make the mod SDK pleasant enough that other people can extend the native
    side without forking everything; and
-5. ship a stable manager and release package that people can undo just as
+6. ship a stable manager and release package that people can undo just as
    easily as they installed it.
 
 The less hand-wavy version is in [docs/ROADMAP.md](docs/ROADMAP.md).
@@ -185,6 +227,7 @@ Useful project notes:
 - [Compatibility model](docs/COMPATIBILITY.md)
 - [Performance results](docs/PERFORMANCE.md)
 - [Local testing](docs/LOCAL_TESTING.md)
+- [Remote browser testing](docs/REMOTE_TESTING.md)
 - [Save and installation safety](docs/SAFETY.md)
 
 ## License and credit

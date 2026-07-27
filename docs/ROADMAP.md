@@ -16,12 +16,32 @@ coverage, and a before/after measurement.
 | Crowded-turn AI | Profiling and local prototypes | Exact-state paired wins that survive mod replacement |
 | Movement, combat, and status | Queued | Stable state boundaries and deterministic fixtures |
 | Map generation and world work | Queued | Seed contracts and gameplay-invariant tests |
-| Assets and startup | Planned separately | Startup, memory, and visual measurements |
+| Remote testing and cache | Working in the isolated test build | More browsers, slow links, reconnects, and cache upgrades |
+| Assets and startup | Runtime skeleton exists | Normal-game integration plus startup, memory, and visual measurements |
 | Mod SDK | Skeleton exists | Examples, diagnostics, ABI docs, and a compatibility suite |
 | Stable release | Not there yet | Clean installs, long sessions, upgrades, and painless uninstall |
 
 “Queued” does not mean forgotten. It means profiling has not earned that code a
 trip across the JavaScript/WASM boundary yet.
+
+## The route from alpha to stable
+
+This is the working order. If the profiler finds a hotter bottleneck, it gets
+to cut the line.
+
+| Milestone | Main result |
+| --- | --- |
+| Foundation | Reversible install, exact version gates, safe fallback, and isolated tests |
+| Crowded turns | Movement and common AI queries stop repeating avoidable map-wide work |
+| Combat and status | Damage, healing, buffs, events, and RNG cross the boundary in useful batches |
+| World | Map generation, capture, escort, prison, and long-run fixtures become repeatable |
+| Assets and remote play | Startup improves and slow clients keep what they already downloaded |
+| Mod SDK | JavaScript hooks and optional WASM plugins have a documented compatibility contract |
+| Stable release | Windows and Linux packages install, upgrade, diagnose, and uninstall cleanly |
+
+The point is to finish usable layers. A half-rewritten game is less interesting
+than a hybrid build that can be installed today and improved one hot path at a
+time.
 
 ## Now: foundation and pathfinding
 
@@ -83,7 +103,10 @@ seed contracts need explicit tests.
 ## Assets and startup
 
 Rendering is not automatically fixed by rewriting simulation code. The asset
-track is separate:
+track is separate. The repository already has an adaptive asset-manager
+skeleton, and the isolated remote server already fingerprints the test build,
+warms its browser assets, and gives unchanged files long-lived cache rules.
+The normal game still needs the deeper work:
 
 - deduplicate concurrent downloads;
 - cache assets locally after the first successful fetch;
@@ -94,6 +117,22 @@ track is separate:
 
 Visual changes need screenshot/reference testing so “optimized” does not quietly
 mean “blurry or missing.”
+
+## Remote testing
+
+Remote testing is useful now, not just a future checkbox:
+
+- the server listens on a chosen interface and port;
+- tokenized entry becomes an HTTP-only browser cookie;
+- normal Electron saves are never served;
+- the first visit warms the browser-useful asset set;
+- versioned ETags revalidate changed files without redownloading everything;
+  and
+- trusted HTTPS origins can use Cache Storage and a cache-first service worker.
+
+Next comes reconnect and resume testing, storage-pressure behavior, friendlier
+launch controls, and proof across desktop and mobile browsers. It is a personal
+test tool, not a mirror for redistributing the game.
 
 ## Quality-of-life work
 
