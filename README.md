@@ -19,7 +19,7 @@ testing, and remote-play pipelines are alive. The current source includes the
 accepted pathfinding, crowded-turn, map-generation, texture, and compatibility
 work described below.
 
-What exists today: (yaps)
+What exists today: (yaps) [installation](https://github.com/Whyaremax/rusted-kinks/tree/main#installing-a-release)
 
 - a deterministic Rust core compiled to WebAssembly;
 - a binary protocol, snapshots, spatial indexing, and three pathfinding modes;
