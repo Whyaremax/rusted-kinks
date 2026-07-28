@@ -1,7 +1,6 @@
 # Rusted Kinks (KD Hybrid)
 
-Rusted Kinks started as a toilet thought: Kinky Dungeon is fun, but some of its
-JavaScript hot paths work much harder than they need to.
+Rusted Kinks, rewrite of Kinky Dungeon by Ada in, well rust. I thought of this when I’m in middle of businesses.
 
 The idea is simple: move expensive, repeatable work into Rust/WebAssembly while
 keeping the Electron/Pixi interface, original JavaScript behavior, and modding
