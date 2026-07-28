@@ -27,16 +27,27 @@ int runHeadless(int argc, char* argv[])
     const QStringList arguments = application.arguments();
     const QString command = optionValue(arguments, QStringLiteral("--headless"));
     const QString appRoot = optionValue(arguments, QStringLiteral("--app-root"));
+    const QString mode =
+        optionValue(arguments, QStringLiteral("--pathfinding-mode"));
     if (command.isEmpty() || appRoot.isEmpty()) {
         throw std::runtime_error(
-            "Usage: KDHybridManager --headless <status|install|uninstall> "
-            "--app-root <path>");
+            "Usage: KDHybridManager --headless "
+            "<status|install|configure|uninstall> --app-root <path> "
+            "[--pathfinding-mode <quality|fast|human>]");
     }
     kd::PatcherStatus result;
     if (command == QLatin1String("status")) {
         result = kd::Patcher::status(appRoot);
     } else if (command == QLatin1String("install")) {
-        result = kd::Patcher::install(appRoot);
+        result = kd::Patcher::install(
+            appRoot, false,
+            mode.isEmpty() ? QStringLiteral("fast") : mode);
+    } else if (command == QLatin1String("configure")) {
+        if (mode.isEmpty()) {
+            throw std::runtime_error(
+                "configure requires --pathfinding-mode");
+        }
+        result = kd::Patcher::updatePathfindingMode(appRoot, mode);
     } else if (command == QLatin1String("uninstall")) {
         result = kd::Patcher::uninstall(appRoot);
     } else {

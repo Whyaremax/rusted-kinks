@@ -75,11 +75,12 @@ describe("binary protocol", () => {
       start: { x: 1, y: 2 },
       goal: { x: 9, y: 8 },
       maxVisited: 4_096,
-      diagonal: true
+      diagonal: true,
+      mode: "human"
     });
     expect(new TextDecoder().decode(encoded.slice(0, 4))).toBe("KDQ1");
     expect(encoded[6]).toBe(3);
-    expect(encoded[7]).toBe(1);
+    expect(encoded[7]).toBe(5);
   });
 
   it("rejects trailing bytes", () => {

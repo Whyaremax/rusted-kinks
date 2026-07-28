@@ -11,6 +11,7 @@ export const SYSTEM_NAMES = [
 
 export type SystemName = (typeof SYSTEM_NAMES)[number];
 export type SystemMode = "native" | "js-fallback" | "disabled";
+export type PathfindingMode = "quality" | "fast" | "human";
 
 export interface SystemStatus {
   readonly system: SystemName;
@@ -28,6 +29,7 @@ export type HookPhase = "before" | "after" | "error";
 
 export interface HookContext {
   readonly system: SystemName;
+  readonly globalName: string;
   args: unknown[];
   result?: unknown;
   error?: unknown;
@@ -52,6 +54,7 @@ export interface RuntimeStatus {
   readonly upstreamPackageVersion: string | null;
   readonly upstreamBundleSha256: string | null;
   readonly nativeAvailable: boolean;
+  readonly pathfindingMode: PathfindingMode;
   readonly systems: readonly SystemStatus[];
 }
 
@@ -79,6 +82,8 @@ export interface KDHybridPublicApi {
   unregisterHook(id: string): boolean;
   dispatch(system: SystemName, ...args: unknown[]): unknown;
   query(payload: Uint8Array): Uint8Array;
+  getPathfindingMode(): PathfindingMode;
+  setPathfindingMode(mode: PathfindingMode): PathfindingMode;
   enableSystem(system: SystemName): boolean;
   disableSystem(system: SystemName, reason?: string): boolean;
   registerWasmPlugin(
@@ -114,6 +119,16 @@ export interface WasmPluginHandle {
   dispose(): void;
 }
 
+export interface MapGenerationPathfindingDirectFallbackStats {
+  optimizedMaps: number;
+  fallbackMaps: number;
+}
+
+export interface MapGenerationPathCacheEdgeIdentityStats {
+  optimizedMaps: number;
+  fallbackMaps: number;
+}
+
 declare global {
   // eslint-disable-next-line no-var
   var KDHybrid: KDHybridPublicApi | undefined;
@@ -125,6 +140,22 @@ declare global {
         upstreamBundleSha256?: string;
         wasmUrl?: string;
         quality?: "high" | "balanced" | "performance" | "auto";
+        pathfindingMode?: PathfindingMode;
+        rendering?: {
+          textureMode?: "original" | "full" | "mobile";
+        };
+      }
+    | undefined;
+  // Developer-only A/B controls. Production defaults use the optimized path.
+  // eslint-disable-next-line no-var
+  var KDHybridRuntimeControl:
+    | {
+        disableMapGenerationPathfindingDirectFallback?: boolean;
+        mapGenerationPathfindingDirectFallbackStats?:
+          MapGenerationPathfindingDirectFallbackStats;
+        disableMapGenerationPathCacheEdgeIdentitySkip?: boolean;
+        mapGenerationPathCacheEdgeIdentityStats?:
+          MapGenerationPathCacheEdgeIdentityStats;
       }
     | undefined;
 }

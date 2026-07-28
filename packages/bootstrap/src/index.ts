@@ -5,7 +5,26 @@ import {
   type WasmBindings
 } from "@kd-hybrid/runtime";
 
-import { waitForKinkyDungeonPathfindingAdapter } from "./kd-adapters.js";
+import {
+  hasKDNearestPlayerSourcePatch,
+  waitForKDCommanderHelpShortcutAdapter,
+  waitForKDEnemySelectorAdapter,
+  waitForKDEnemyUpdateCacheAdapter,
+  waitForKDFindMasterAdapter,
+  waitForKDJailKeyEarlyReturnAdapter,
+  waitForKDNearestPlayerAdapter,
+  waitForKDNearbyEnemiesAdapter,
+  waitForKinkyDungeonMapGenerationAdapter,
+  waitForKinkyDungeonPathfindingAdapter
+} from "./kd-adapters.js";
+import {
+  installKinkyDungeonRendering,
+  type KinkyDungeonRenderingHandle
+} from "./rendering.js";
+import {
+  installKinkyDungeonStartup,
+  type KinkyDungeonStartupHandle
+} from "./startup.js";
 
 declare global {
   // Internal integration surface intentionally separate from the public SDK.
@@ -20,6 +39,8 @@ declare global {
 
 export interface BootstrapHandle {
   readonly runtime: KDHybridRuntime;
+  readonly rendering: KinkyDungeonRenderingHandle;
+  readonly startup: KinkyDungeonStartupHandle;
   readonly nativeReady: Promise<boolean>;
   dispose(): void;
 }
@@ -30,9 +51,11 @@ export function installBootstrap(): BootstrapHandle {
   if (active !== null) {
     return active;
   }
+  const startup = installKinkyDungeonStartup();
   const config = globalThis.KDHybridBootstrapConfig;
   const runtime = new KDHybridRuntime({
     qualityMode: config?.quality ?? "auto",
+    pathfindingMode: config?.pathfindingMode ?? "fast",
     ...(config?.upstreamVersion === undefined
       ? {}
       : { upstreamVersion: config.upstreamVersion }),
@@ -51,12 +74,36 @@ export function installBootstrap(): BootstrapHandle {
     }
   });
 
-  const stopFrames = monitorFrames(runtime);
-  const stopQuality = applyQualityHints(runtime);
+  const rendering = installKinkyDungeonRendering({
+    tier: runtime.quality.status().tier,
+    textureMode:
+      config?.rendering?.textureMode ??
+      (config?.quality === "high" ? "full" : "mobile"),
+    ...(config?.upstreamVersion === undefined
+      ? {}
+      : { upstreamVersion: config.upstreamVersion }),
+    ...(config?.upstreamBundleSha256 === undefined
+      ? {}
+      : { upstreamBundleSha256: config.upstreamBundleSha256 })
+  });
+  const stopFrames = monitorFrames(runtime, rendering);
+  const stopQuality = applyQualityHints(runtime, rendering);
   const nativeReady = loadNative(runtime)
     .then(async (ready) => {
       if (ready) {
-        await waitForKinkyDungeonPathfindingAdapter(runtime);
+        await Promise.all([
+          waitForKinkyDungeonMapGenerationAdapter(runtime),
+          waitForKDEnemySelectorAdapter(runtime),
+          waitForKinkyDungeonPathfindingAdapter(runtime),
+          waitForKDNearbyEnemiesAdapter(runtime),
+          waitForKDCommanderHelpShortcutAdapter(runtime),
+          waitForKDFindMasterAdapter(runtime),
+          waitForKDJailKeyEarlyReturnAdapter(runtime),
+          waitForKDEnemyUpdateCacheAdapter(runtime)
+        ]);
+        if (!hasKDNearestPlayerSourcePatch()) {
+          await waitForKDNearestPlayerAdapter(runtime);
+        }
       }
       return ready;
     })
@@ -69,10 +116,14 @@ export function installBootstrap(): BootstrapHandle {
 
   active = Object.freeze({
     runtime,
+    rendering,
+    startup,
     nativeReady,
     dispose: () => {
       stopFrames();
       stopQuality();
+      rendering.dispose();
+      startup.dispose();
       runtime.dispose();
       globalThis.KDHybridRuntimeInternal = undefined;
       active = null;
@@ -130,7 +181,10 @@ function currentScriptUrl(): string {
   return new URL("kd-hybrid/kd-hybrid-bootstrap.js", document.baseURI).toString();
 }
 
-function monitorFrames(runtime: KDHybridRuntime): () => void {
+function monitorFrames(
+  runtime: KDHybridRuntime,
+  rendering: KinkyDungeonRenderingHandle
+): () => void {
   if (typeof requestAnimationFrame === "undefined") {
     return () => undefined;
   }
@@ -142,7 +196,11 @@ function monitorFrames(runtime: KDHybridRuntime): () => void {
       return;
     }
     if (previous !== null) {
-      runtime.quality.recordFrame(now - previous, now, rendererMemory());
+      runtime.quality.recordFrame(
+        now - previous,
+        now,
+        rendering.sampleTextureMemory()
+      );
     }
     previous = now;
     request = requestAnimationFrame(frame);
@@ -154,15 +212,12 @@ function monitorFrames(runtime: KDHybridRuntime): () => void {
   };
 }
 
-function rendererMemory(): number | undefined {
-  const memory = performance as Performance & {
-    memory?: { usedJSHeapSize?: number };
-  };
-  return memory.memory?.usedJSHeapSize;
-}
-
-function applyQualityHints(runtime: KDHybridRuntime): () => void {
+function applyQualityHints(
+  runtime: KDHybridRuntime,
+  rendering: KinkyDungeonRenderingHandle
+): () => void {
   const apply = (tier: QualityTier): void => {
+    rendering.setTier(tier);
     const scale = tier === "high" ? 1 : tier === "balanced" ? 0.75 : 0.5;
     document.documentElement.dataset.kdHybridQuality = tier;
     document.documentElement.style.setProperty("--kd-hybrid-texture-scale", String(scale));

@@ -17,7 +17,13 @@ describe("diagnostics privacy", () => {
           endpoint: "https://example.test/report",
           token: "abcdefghijklmnopqrstuvwx123456"
         },
-        mods: [{ name: "Private Mod", version: "1.2.3" }]
+        mods: [{
+          name: "Private Mod",
+          version: "1.2.3",
+          capabilities: ["read-state"],
+          systems: ["pathfinding"],
+          kind: "wasm"
+        }]
       },
       new Date("2026-01-01T00:00:00Z")
     );
@@ -27,6 +33,16 @@ describe("diagnostics privacy", () => {
     expect(json).not.toContain("Private Mod");
     expect(json).toContain("<redacted>");
     expect(json).toContain("<path>");
+    const document = JSON.parse(json);
+    expect(document.mods).toEqual([
+      {
+        id: expect.any(String),
+        kind: "wasm",
+        version: "1.2.3",
+        capabilities: ["read-state"],
+        systems: ["pathfinding"]
+      }
+    ]);
   });
 
   it("handles cycles without leaking source objects", () => {

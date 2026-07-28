@@ -2,7 +2,14 @@
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { install, status, uninstall } from "./patcher.js";
+import {
+  install,
+  status,
+  uninstall,
+  updateConfiguration,
+  type PatcherPathfindingMode,
+  type PatcherTextureMode
+} from "./patcher.js";
 
 const VERSION = "0.1.0";
 
@@ -19,7 +26,25 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         toolVersion: VERSION,
         ...(options.has("upstream-version")
           ? { upstreamVersion: required(options, "upstream-version") }
-          : {})
+          : {}),
+        ...(options.has("pathfinding-mode")
+          ? {
+              pathfindingMode: requiredPathfindingMode(
+                options,
+                "pathfinding-mode"
+              )
+            }
+          : {}),
+        ...(options.has("texture-mode")
+          ? {
+              textureMode: requiredTextureMode(
+                options,
+                "texture-mode"
+              )
+            }
+          : {}),
+        sourceOptimizations:
+          options.get("source-optimizations")?.toLowerCase() !== "false"
       });
       print(result);
       return result.state === "installed" ? 0 : 2;
@@ -36,9 +61,39 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       print(result);
       return result.state === "not-installed" ? 0 : 2;
     }
+    case "configure": {
+      if (
+        !options.has("pathfinding-mode") &&
+        !options.has("texture-mode")
+      ) {
+        throw new TypeError(
+          "Configure requires --pathfinding-mode and/or --texture-mode"
+        );
+      }
+      const result = await updateConfiguration(appRoot, {
+        ...(options.has("pathfinding-mode")
+          ? {
+              pathfindingMode: requiredPathfindingMode(
+                options,
+                "pathfinding-mode"
+              )
+            }
+          : {}),
+        ...(options.has("texture-mode")
+          ? {
+              textureMode: requiredTextureMode(
+                options,
+                "texture-mode"
+              )
+            }
+          : {})
+      });
+      print(result);
+      return result.state === "installed" ? 0 : 2;
+    }
     default:
       throw new Error(
-        "Expected patcher command install, status, or uninstall."
+        "Expected patcher command install, configure, status, or uninstall."
       );
   }
 }
@@ -60,6 +115,37 @@ function required(options: ReadonlyMap<string, string>, name: string): string {
   const value = options.get(name);
   if (!value) {
     throw new TypeError(`Missing required option --${name}`);
+  }
+  return value;
+}
+
+function requiredPathfindingMode(
+  options: ReadonlyMap<string, string>,
+  name: string
+): PatcherPathfindingMode {
+  const value = required(options, name);
+  if (value !== "quality" && value !== "fast" && value !== "human") {
+    throw new TypeError(
+      `Option --${name} must be quality, fast, or human`
+    );
+  }
+  return value;
+}
+
+function requiredTextureMode(
+  options: ReadonlyMap<string, string>,
+  name: string
+): PatcherTextureMode {
+  const value = required(options, name);
+  if (
+    value !== "auto" &&
+    value !== "original" &&
+    value !== "full" &&
+    value !== "mobile"
+  ) {
+    throw new TypeError(
+      `Option --${name} must be auto, original, full, or mobile`
+    );
   }
   return value;
 }

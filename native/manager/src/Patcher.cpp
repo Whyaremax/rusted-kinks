@@ -1,4 +1,5 @@
 #include "Patcher.h"
+#include "SourcePatches.h"
 
 #include <QCryptographicHash>
 #include <QDateTime>
@@ -19,8 +20,6 @@ namespace {
 
 constexpr auto kKnownGameVersion = "5.4.92";
 constexpr auto kKnownPackageVersion = "5.1.12";
-constexpr auto kKnownBundleSha256 =
-    "2d3041a085cbe475a63227ff40709f6d9c1595c77a58545c69edf359a57605a4";
 constexpr auto kStateDirectory = ".kd-hybrid";
 constexpr auto kManifestPath = ".kd-hybrid/installation.json";
 constexpr auto kPendingPath = ".kd-hybrid/pending-installation.json";
@@ -30,6 +29,27 @@ constexpr auto kBootstrapScript = "kd-hybrid/kd-hybrid-bootstrap.js";
 [[noreturn]] void fail(const QString& message)
 {
     throw std::runtime_error(message.toStdString());
+}
+
+QString validatePathfindingMode(const QString& mode)
+{
+    if (mode != QLatin1String("quality") && mode != QLatin1String("fast")
+        && mode != QLatin1String("human")) {
+        fail(QStringLiteral("Unknown pathfinding mode: %1").arg(mode));
+    }
+    return mode;
+}
+
+QString inlineJson(const QJsonObject& object)
+{
+    QString value =
+        QString::fromUtf8(QJsonDocument(object).toJson(QJsonDocument::Compact));
+    value.replace(QStringLiteral("<"), QStringLiteral("\\u003c"));
+    value.replace(QStringLiteral(">"), QStringLiteral("\\u003e"));
+    value.replace(QStringLiteral("&"), QStringLiteral("\\u0026"));
+    value.replace(QChar(0x2028), QStringLiteral("\\u2028"));
+    value.replace(QChar(0x2029), QStringLiteral("\\u2029"));
+    return value;
 }
 
 Qt::CaseSensitivity pathCaseSensitivity()
@@ -205,6 +225,24 @@ QJsonObject validateManifest(const QJsonObject& manifest, const QString& appRoot
         resolveInside(appRoot,
                       value.toObject().value(QStringLiteral("path")).toString());
     }
+    const QJsonValue sourcePatchValue =
+        manifest.value(QStringLiteral("sourcePatch"));
+    if (!sourcePatchValue.isUndefined()) {
+        if (!sourcePatchValue.isObject()) {
+            fail(QStringLiteral("Invalid source patch in installation manifest"));
+        }
+        const QJsonObject sourcePatch = sourcePatchValue.toObject();
+        if (!sourcePatch.value(QStringLiteral("path")).isString()
+            || !sourcePatch.value(QStringLiteral("backupPath")).isString()
+            || !sourcePatch.value(QStringLiteral("originalSha256")).isString()
+            || !sourcePatch.value(QStringLiteral("patchedSha256")).isString()) {
+            fail(QStringLiteral("Invalid source patch in installation manifest"));
+        }
+        resolveInside(
+            appRoot, sourcePatch.value(QStringLiteral("path")).toString());
+        resolveInside(
+            appRoot, sourcePatch.value(QStringLiteral("backupPath")).toString());
+    }
     return manifest;
 }
 
@@ -296,7 +334,9 @@ Inspection Patcher::inspect(const QString& selectedPath)
     result.appRoot = normalizeAppRoot(selectedPath);
     result.bundleSha256 =
         sha256File(resolveInside(result.appRoot, QStringLiteral("out/main.js")));
-    result.knownBundle = result.bundleSha256 == QLatin1String(kKnownBundleSha256);
+    result.knownBundle = isKnownSourceBundle(result.bundleSha256);
+    result.sourcePatched =
+        result.bundleSha256 == sourcePatchOutputSha256();
     if (result.knownBundle) {
         result.gameVersion = QString::fromLatin1(kKnownGameVersion);
         result.packageVersion = QString::fromLatin1(kKnownPackageVersion);
@@ -348,9 +388,15 @@ PatcherStatus Patcher::status(const QString& selectedPath)
     }
     const QJsonObject upstream =
         result.manifest.value(QStringLiteral("upstream")).toObject();
+    const QJsonObject sourcePatch =
+        result.manifest.value(QStringLiteral("sourcePatch")).toObject();
+    const QString expectedBundleSha256 =
+        sourcePatch.isEmpty()
+        ? upstream.value(QStringLiteral("bundleSha256")).toString()
+        : sourcePatch.value(QStringLiteral("patchedSha256")).toString();
     if (sha256File(resolveInside(
             appRoot, upstream.value(QStringLiteral("bundlePath")).toString()))
-        != upstream.value(QStringLiteral("bundleSha256")).toString()) {
+        != expectedBundleSha256) {
         result.problems.append(
             QStringLiteral("out/main.js changed after KD Hybrid installation"));
     }
@@ -360,8 +406,11 @@ PatcherStatus Patcher::status(const QString& selectedPath)
 }
 
 PatcherStatus Patcher::install(const QString& selectedPath,
-                               bool allowUnknownBundle)
+                               bool allowUnknownBundle,
+                               const QString& pathfindingModeInput)
 {
+    const QString pathfindingMode =
+        validatePathfindingMode(pathfindingModeInput);
     const PatcherStatus current = status(selectedPath);
     if (current.state == PatcherState::Installed) {
         return current;
@@ -377,8 +426,18 @@ PatcherStatus Patcher::install(const QString& selectedPath,
                  "verified game builds")
                  .arg(inspection.bundleSha256));
     }
+    if (inspection.sourcePatched) {
+        fail(QStringLiteral(
+            "out/main.js already contains the recognized source patch but "
+            "has no installation manifest or original backup"));
+    }
 
     const QStringList files = payloadFiles();
+    const QString bundlePath =
+        resolveInside(inspection.appRoot, QStringLiteral("out/main.js"));
+    const QByteArray originalBundle = readAll(bundlePath);
+    const SourcePatchResult sourcePatch =
+        applyKnownSourcePatch(originalBundle, inspection.bundleSha256);
     const QString indexPath =
         resolveInside(inspection.appRoot, QStringLiteral("index.html"));
     const QByteArray originalIndex = readAll(indexPath);
@@ -412,19 +471,13 @@ PatcherStatus Patcher::install(const QString& selectedPath,
                                 : QJsonValue(QJsonValue::Null)},
         {QStringLiteral("upstreamBundleSha256"), inspection.bundleSha256},
         {QStringLiteral("quality"), QStringLiteral("auto")},
+        {QStringLiteral("pathfindingMode"), pathfindingMode},
     };
-    QString inlineJson =
-        QString::fromUtf8(QJsonDocument(config).toJson(QJsonDocument::Compact));
-    inlineJson.replace(QStringLiteral("<"), QStringLiteral("\\u003c"));
-    inlineJson.replace(QStringLiteral(">"), QStringLiteral("\\u003e"));
-    inlineJson.replace(QStringLiteral("&"), QStringLiteral("\\u0026"));
-    inlineJson.replace(QChar(0x2028), QStringLiteral("\\u2028"));
-    inlineJson.replace(QChar(0x2029), QStringLiteral("\\u2029"));
     const QString injection =
         QStringLiteral(
             "<script>globalThis.KDHybridBootstrapConfig=Object.freeze(%1);"
             "</script><script src=\"./%2\"></script>")
-            .arg(inlineJson, QString::fromLatin1(kBootstrapScript));
+            .arg(inlineJson(config), QString::fromLatin1(kBootstrapScript));
     originalText.replace(found.first().capturedStart(),
                          found.first().capturedLength(),
                          injection + found.first().captured());
@@ -439,13 +492,23 @@ PatcherStatus Patcher::install(const QString& selectedPath,
         QStringLiteral("%1/backups/%2/index.html").arg(kStateDirectory, id);
     const QString backupPath =
         resolveInside(inspection.appRoot, backupRelative);
+    const QString bundleBackupRelative =
+        QStringLiteral("%1/backups/%2/out-main.js")
+            .arg(kStateDirectory, id);
     writeExclusive(backupPath, originalIndex);
+    QJsonObject sourcePatchManifest = sourcePatch.manifest;
+    if (sourcePatch.applied) {
+        writeExclusive(resolveInside(inspection.appRoot, bundleBackupRelative),
+                       originalBundle);
+        sourcePatchManifest.insert(QStringLiteral("backupPath"),
+                                   portablePath(bundleBackupRelative));
+    }
 
     QJsonArray installedFiles;
     for (const QString& relativePath : files) {
         installedFiles.append(embeddedFileRecord(relativePath));
     }
-    const QJsonObject manifest{
+    QJsonObject manifest{
         {QStringLiteral("schema"), 1},
         {QStringLiteral("id"), id},
         {QStringLiteral("toolVersion"),
@@ -473,7 +536,14 @@ PatcherStatus Patcher::install(const QString& selectedPath,
              {QStringLiteral("patchedSha256"), sha256(patchedIndex)},
          }},
         {QStringLiteral("files"), installedFiles},
+        {QStringLiteral("settings"),
+         QJsonObject{
+             {QStringLiteral("pathfindingMode"), pathfindingMode},
+         }},
     };
+    if (sourcePatch.applied) {
+        manifest.insert(QStringLiteral("sourcePatch"), sourcePatchManifest);
+    }
 
     const QString stateRoot = resolveInside(inspection.appRoot, kStateDirectory);
     if (!QDir().mkpath(stateRoot)) {
@@ -481,10 +551,74 @@ PatcherStatus Patcher::install(const QString& selectedPath,
     }
     atomicWriteJson(resolveInside(inspection.appRoot, kPendingPath), manifest);
     copyPayload(inspection.appRoot, files);
+    if (sourcePatch.applied) {
+        atomicWrite(bundlePath, sourcePatch.bytes);
+    }
     atomicWrite(indexPath, patchedIndex);
     atomicWriteJson(resolveInside(inspection.appRoot, kManifestPath), manifest);
     QFile::remove(resolveInside(inspection.appRoot, kPendingPath));
     return status(inspection.appRoot);
+}
+
+PatcherStatus Patcher::updatePathfindingMode(
+    const QString& selectedPath,
+    const QString& pathfindingModeInput)
+{
+    const QString pathfindingMode =
+        validatePathfindingMode(pathfindingModeInput);
+    const PatcherStatus current = status(selectedPath);
+    if (current.state != PatcherState::Installed
+        || current.manifest.isEmpty()) {
+        fail(QStringLiteral(
+                 "Refusing settings update over %1 patcher state: %2")
+                 .arg(stateName(current.state),
+                      current.problems.join(QStringLiteral("; "))));
+    }
+    const QString& appRoot = current.inspection.appRoot;
+    const QJsonObject index =
+        current.manifest.value(QStringLiteral("index")).toObject();
+    const QString indexPath =
+        resolveInside(appRoot, index.value(QStringLiteral("path")).toString());
+    QString text = QString::fromUtf8(readAll(indexPath));
+    const QRegularExpression configPattern(
+        QStringLiteral(
+            R"(<script>globalThis\.KDHybridBootstrapConfig=Object\.freeze\((\{[^<]*\})\);</script>)"));
+    const QRegularExpressionMatch match = configPattern.match(text);
+    if (!match.hasMatch()) {
+        fail(QStringLiteral(
+            "Could not uniquely locate KD Hybrid bootstrap configuration"));
+    }
+    QJsonParseError parseError;
+    const QJsonDocument document =
+        QJsonDocument::fromJson(match.captured(1).toUtf8(), &parseError);
+    if (parseError.error != QJsonParseError::NoError
+        || !document.isObject()) {
+        fail(QStringLiteral("Invalid KD Hybrid bootstrap configuration"));
+    }
+    QJsonObject config = document.object();
+    config.insert(QStringLiteral("pathfindingMode"), pathfindingMode);
+    const QString replacement =
+        QStringLiteral(
+            "<script>globalThis.KDHybridBootstrapConfig=Object.freeze(%1);"
+            "</script>")
+            .arg(inlineJson(config));
+    text.replace(match.capturedStart(), match.capturedLength(), replacement);
+    const QByteArray patchedIndex = text.toUtf8();
+
+    QJsonObject manifest = current.manifest;
+    QJsonObject updatedIndex = index;
+    updatedIndex.insert(QStringLiteral("patchedSha256"), sha256(patchedIndex));
+    manifest.insert(QStringLiteral("index"), updatedIndex);
+    manifest.insert(
+        QStringLiteral("settings"),
+        QJsonObject{
+            {QStringLiteral("pathfindingMode"), pathfindingMode},
+        });
+    atomicWriteJson(resolveInside(appRoot, kPendingPath), manifest);
+    atomicWrite(indexPath, patchedIndex);
+    atomicWriteJson(resolveInside(appRoot, kManifestPath), manifest);
+    QFile::remove(resolveInside(appRoot, kPendingPath));
+    return status(appRoot);
 }
 
 PatcherStatus Patcher::uninstall(const QString& selectedPath)
@@ -509,6 +643,24 @@ PatcherStatus Patcher::uninstall(const QString& selectedPath)
         != index.value(QStringLiteral("originalSha256")).toString()) {
         fail(QStringLiteral(
             "Original index.html backup hash does not match the manifest"));
+    }
+    const QJsonObject sourcePatch =
+        current.manifest.value(QStringLiteral("sourcePatch")).toObject();
+    QByteArray originalBundle;
+    if (!sourcePatch.isEmpty()) {
+        originalBundle = readAll(resolveInside(
+            appRoot, sourcePatch.value(QStringLiteral("backupPath")).toString()));
+        if (sha256(originalBundle)
+            != sourcePatch.value(QStringLiteral("originalSha256")).toString()) {
+            fail(QStringLiteral(
+                "Original out/main.js backup hash does not match the manifest"));
+        }
+    }
+    if (!sourcePatch.isEmpty()) {
+        atomicWrite(
+            resolveInside(
+                appRoot, sourcePatch.value(QStringLiteral("path")).toString()),
+            originalBundle);
     }
     atomicWrite(resolveInside(
                     appRoot, index.value(QStringLiteral("path")).toString()),
@@ -557,6 +709,7 @@ QJsonObject Patcher::toJson(const PatcherStatus& value)
              ? QJsonValue(QJsonValue::Null)
              : QJsonValue(value.inspection.gameVersion)},
         {QStringLiteral("knownBundle"), value.inspection.knownBundle},
+        {QStringLiteral("sourcePatched"), value.inspection.sourcePatched},
         {QStringLiteral("manifest"),
          value.manifest.isEmpty() ? QJsonValue(QJsonValue::Null)
                                   : QJsonValue(value.manifest)},

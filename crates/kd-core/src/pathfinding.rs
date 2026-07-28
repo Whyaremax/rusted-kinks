@@ -30,14 +30,6 @@ struct OpenNode {
     sequence: u32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct KdOpenNode {
-    position: Position,
-    f_score: f64,
-    g_score: f64,
-    parent: Option<usize>,
-}
-
 impl Ord for OpenNode {
     fn cmp(&self, other: &Self) -> Ordering {
         // Reverse ordering turns BinaryHeap into a deterministic min-heap.
@@ -52,6 +44,209 @@ impl Ord for OpenNode {
 impl PartialOrd for OpenNode {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[repr(u8)]
+pub enum PathfindingMode {
+    Quality = 1,
+    #[default]
+    Fast = 0,
+    Human = 2,
+}
+
+impl PathfindingMode {
+    #[must_use]
+    pub const fn query_flags(self) -> u8 {
+        (self as u8) << 1
+    }
+
+    #[must_use]
+    pub const fn from_query_flags(flags: u8) -> Option<Self> {
+        match (flags >> 1) & 0b11 {
+            0 => Some(Self::Fast),
+            1 => Some(Self::Quality),
+            2 => Some(Self::Human),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct SearchNode {
+    state: usize,
+    f_score: f64,
+    g_score: f64,
+    sequence: u32,
+}
+
+impl PartialEq for SearchNode {
+    fn eq(&self, other: &Self) -> bool {
+        self.state == other.state
+            && self.f_score.to_bits() == other.f_score.to_bits()
+            && self.g_score.to_bits() == other.g_score.to_bits()
+            && self.sequence == other.sequence
+    }
+}
+
+impl Eq for SearchNode {}
+
+impl Ord for SearchNode {
+    fn cmp(&self, other: &Self) -> Ordering {
+        other
+            .f_score
+            .total_cmp(&self.f_score)
+            .then_with(|| other.g_score.total_cmp(&self.g_score))
+            .then_with(|| other.sequence.cmp(&self.sequence))
+    }
+}
+
+impl PartialOrd for SearchNode {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+const NO_PARENT: usize = usize::MAX;
+const HUMAN_DIRECTION_NONE: u8 = 8;
+const FAST_HEURISTIC_WEIGHT: f64 = 1.35;
+const HUMAN_HEURISTIC_WEIGHT: f64 = 1.25;
+const HUMAN_TURN_PENALTY: f64 = 0.35;
+const MAX_QUALITY_FIELDS: usize = 8;
+
+#[derive(Debug)]
+struct QualityField {
+    goal_index: usize,
+    diagonal: bool,
+    distances: Vec<f64>,
+    next: Vec<usize>,
+    settled: Vec<bool>,
+    open: BinaryHeap<SearchNode>,
+    sequence: u32,
+    last_used: u64,
+}
+
+impl QualityField {
+    fn new(tile_count: usize, goal_index: usize, diagonal: bool, last_used: u64) -> Self {
+        let mut distances = vec![f64::INFINITY; tile_count];
+        distances[goal_index] = 0.0;
+        let mut open = BinaryHeap::new();
+        open.push(SearchNode {
+            state: goal_index,
+            f_score: 0.0,
+            g_score: 0.0,
+            sequence: 0,
+        });
+        Self {
+            goal_index,
+            diagonal,
+            distances,
+            next: vec![NO_PARENT; tile_count],
+            settled: vec![false; tile_count],
+            open,
+            sequence: 0,
+            last_used,
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct GridPathWorkspace {
+    epoch: u32,
+    seen: Vec<u32>,
+    closed: Vec<u32>,
+    g_scores: Vec<f64>,
+    parents: Vec<usize>,
+    directions: Vec<u8>,
+    open: BinaryHeap<SearchNode>,
+    sequence: u32,
+    quality_fields: Vec<QualityField>,
+    quality_clock: u64,
+}
+
+impl GridPathWorkspace {
+    pub fn clear_persistent(&mut self) {
+        self.quality_fields.clear();
+        self.open.clear();
+    }
+
+    fn begin(&mut self, state_count: usize) {
+        self.epoch = self.epoch.wrapping_add(1);
+        if self.epoch == 0 {
+            self.seen.fill(0);
+            self.closed.fill(0);
+            self.epoch = 1;
+        }
+        if self.seen.len() < state_count {
+            self.seen.resize(state_count, 0);
+            self.closed.resize(state_count, 0);
+            self.g_scores.resize(state_count, f64::INFINITY);
+            self.parents.resize(state_count, NO_PARENT);
+            self.directions.resize(state_count, HUMAN_DIRECTION_NONE);
+        }
+        self.open.clear();
+        self.sequence = 0;
+    }
+
+    fn set_score(&mut self, state: usize, score: f64, parent: usize) {
+        self.seen[state] = self.epoch;
+        self.g_scores[state] = score;
+        self.parents[state] = parent;
+    }
+
+    fn score(&self, state: usize) -> f64 {
+        if self.seen[state] == self.epoch {
+            self.g_scores[state]
+        } else {
+            f64::INFINITY
+        }
+    }
+
+    fn push(&mut self, state: usize, g_score: f64, f_score: f64) {
+        let sequence = self.sequence;
+        self.sequence = self.sequence.wrapping_add(1);
+        self.open.push(SearchNode {
+            state,
+            f_score,
+            g_score,
+            sequence,
+        });
+    }
+
+    fn quality_field(
+        &mut self,
+        tile_count: usize,
+        goal_index: usize,
+        diagonal: bool,
+    ) -> &mut QualityField {
+        self.quality_clock = self.quality_clock.wrapping_add(1);
+        let last_used = self.quality_clock;
+        if let Some(index) = self
+            .quality_fields
+            .iter()
+            .position(|field| field.goal_index == goal_index && field.diagonal == diagonal)
+        {
+            self.quality_fields[index].last_used = last_used;
+            return &mut self.quality_fields[index];
+        }
+        if self.quality_fields.len() >= MAX_QUALITY_FIELDS {
+            let index = self
+                .quality_fields
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, field)| field.last_used)
+                .map_or(0, |(index, _)| index);
+            self.quality_fields[index] =
+                QualityField::new(tile_count, goal_index, diagonal, last_used);
+            return &mut self.quality_fields[index];
+        }
+        self.quality_fields.push(QualityField::new(
+            tile_count, goal_index, diagonal, last_used,
+        ));
+        self.quality_fields
+            .last_mut()
+            .expect("quality field was just inserted")
     }
 }
 
@@ -165,18 +360,27 @@ pub fn find_grid_path(
     max_visited: u32,
     diagonal: bool,
 ) -> PathResult {
-    find_grid_path_inner(grid, start, goal, max_visited, diagonal)
+    let mut workspace = GridPathWorkspace::default();
+    find_grid_path_with_workspace(
+        grid,
+        start,
+        goal,
+        max_visited,
+        diagonal,
+        PathfindingMode::Fast,
+        &mut workspace,
+    )
 }
 
-// Keeping the audited upstream control-flow correspondence in one function is
-// more valuable here than splitting the search loop across opaque helpers.
-#[allow(clippy::too_many_lines)]
-fn find_grid_path_inner(
+#[must_use]
+pub fn find_grid_path_with_workspace(
     grid: &Grid,
     start: Position,
     goal: Position,
     max_visited: u32,
     diagonal: bool,
+    mode: PathfindingMode,
+    workspace: &mut GridPathWorkspace,
 ) -> PathResult {
     if start == goal {
         return PathResult::Found(vec![start]);
@@ -187,168 +391,261 @@ fn find_grid_path_inner(
     if grid.index(start).is_none() || grid.index(goal).is_none() {
         return PathResult::Unreachable { visited: 0 };
     }
-    let len = grid.tiles().len();
     let Some(start_index) = grid.index(start) else {
         return PathResult::Unreachable { visited: 0 };
     };
-    if grid.index(goal).is_none() {
+    let Some(goal_index) = grid.index(goal) else {
         return PathResult::Unreachable { visited: 0 };
-    }
-
-    // JS Map keeps the first insertion order when an existing key is updated.
-    // A sparse vector plus a cell-to-slot table reproduces that behavior while
-    // avoiding string keys and allocations in the search loop.
-    let start_node = KdOpenNode {
-        position: start,
-        f_score: 0.0,
-        g_score: 0.0,
-        parent: None,
     };
-    let mut open = vec![Some(start_node)];
-    let mut open_slot = vec![None; len];
-    open_slot[start_index] = Some(0);
-    let mut open_count = 1_usize;
-    let mut closed = vec![None; len];
+
+    match mode {
+        PathfindingMode::Quality => quality_grid_path(
+            grid,
+            start_index,
+            goal_index,
+            max_visited,
+            diagonal,
+            workspace,
+        ),
+        PathfindingMode::Fast | PathfindingMode::Human => forward_grid_path(
+            grid,
+            start_index,
+            goal_index,
+            max_visited,
+            diagonal,
+            mode,
+            workspace,
+        ),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn forward_grid_path(
+    grid: &Grid,
+    start_index: usize,
+    goal_index: usize,
+    max_visited: u32,
+    diagonal: bool,
+    mode: PathfindingMode,
+    workspace: &mut GridPathWorkspace,
+) -> PathResult {
+    let human = mode == PathfindingMode::Human;
+    workspace.begin(grid.tiles().len());
+    let start_state = start_index;
+    workspace.set_score(start_state, 0.0, NO_PARENT);
+    workspace.directions[start_state] = HUMAN_DIRECTION_NONE;
+    let start = grid.position(start_index).expect("validated start");
+    let goal = grid.position(goal_index).expect("validated goal");
+    let weight = if human {
+        HUMAN_HEURISTIC_WEIGHT
+    } else {
+        FAST_HEURISTIC_WEIGHT
+    };
+    workspace.push(
+        start_state,
+        0.0,
+        weight * grid_heuristic(start, goal, diagonal),
+    );
     let mut visited = 0_u32;
 
-    while open_count > 0 {
+    while let Some(current) = workspace.open.pop() {
+        if workspace.score(current.state).total_cmp(&current.g_score) != Ordering::Equal
+            || workspace.closed[current.state] == workspace.epoch
+        {
+            continue;
+        }
         if visited >= max_visited {
             return PathResult::BudgetExceeded { visited };
         }
-        let mut lowest = None;
-        let mut lowest_old = None;
-        let mut lowest_slot = None;
-        let mut lowest_cost = 1_000_000_000.0;
-        for (slot, candidate) in open.iter().enumerate() {
-            let Some(candidate) = *candidate else {
-                continue;
-            };
-            if candidate.f_score < lowest_cost {
-                lowest_cost = candidate.f_score;
-                lowest_old = lowest;
-                lowest = Some(candidate);
-                lowest_slot = Some(slot);
-            }
-        }
-        let (Some(current), Some(current_slot)) = (lowest, lowest_slot) else {
-            return PathResult::Unreachable { visited };
-        };
-        let Some(current_index) = grid.index(current.position) else {
-            return PathResult::Unreachable { visited };
-        };
+        workspace.closed[current.state] = workspace.epoch;
         visited += 1;
-
-        let mut successors = Vec::with_capacity(GRID_NEIGHBORS.len());
-        for (dx, dy) in GRID_NEIGHBORS {
+        let current_index = current.state;
+        if current_index == goal_index {
+            return PathResult::Found(reconstruct_workspace_path(
+                grid,
+                workspace,
+                start_state,
+                current.state,
+            ));
+        }
+        let current_position = grid.position(current_index).expect("validated open node");
+        let incoming_direction = if human {
+            usize::from(workspace.directions[current.state])
+        } else {
+            usize::from(HUMAN_DIRECTION_NONE)
+        };
+        for (direction, (dx, dy)) in GRID_NEIGHBORS.into_iter().enumerate() {
             if !diagonal && dx != 0 && dy != 0 {
                 continue;
             }
-            let Some(neighbor) = current.position.offset(dx, dy) else {
+            let Some(neighbor) = current_position.offset(dx, dy) else {
                 continue;
             };
             let Some(neighbor_index) = grid.index(neighbor) else {
                 continue;
             };
-
-            // KD accepts the target before checking its underlying tile and
-            // returns as soon as it is encountered in neighbor order.
-            if neighbor == goal {
-                closed[current_index] = Some(current);
-                let mut path = reconstruct_kd_path(grid, &closed, start_index, current_index);
-                path.push(goal);
-                return PathResult::Found(path);
-            }
-            if !grid.is_walkable(neighbor) {
+            if neighbor_index != goal_index && !grid.is_walkable(neighbor) {
                 continue;
             }
-
-            let mut cost_bonus = f64::from(grid.tiles()[neighbor_index] >> 1) / 4.0;
-            if dx != 0 && dy != 0 {
-                if let Some(previous_record) = lowest_old {
-                    let previous_direction = (
-                        current.position.x - previous_record.position.x,
-                        current.position.y - previous_record.position.y,
-                    );
-                    cost_bonus += if previous_direction == (dx, dy) {
-                        0.22
-                    } else {
-                        0.45
-                    };
-                }
-            }
-            // Preserve JavaScript's left-to-right Number addition order; tiny
-            // rounding differences can change strict f-score tie decisions.
-            let g_score = (1.0 + cost_bonus) + current.g_score;
-            successors.push((
-                neighbor_index,
-                KdOpenNode {
-                    position: neighbor,
-                    g_score,
-                    f_score: g_score + kd_heuristic(neighbor, goal),
-                    parent: Some(current_index),
-                },
-            ));
-        }
-
-        for (neighbor_index, successor) in successors {
-            let open_is_worse = open_slot[neighbor_index].is_none_or(|slot| {
-                open[slot].is_some_and(|candidate| candidate.f_score > successor.f_score)
-            });
-            if !open_is_worse {
-                continue;
-            }
-            let closed_is_worse = closed[neighbor_index]
-                .is_none_or(|candidate| candidate.f_score > successor.f_score);
-            if !closed_is_worse {
-                continue;
-            }
-            if let Some(slot) = open_slot[neighbor_index] {
-                open[slot] = Some(successor);
+            let neighbor_state = neighbor_index;
+            let turn_cost = if human
+                && incoming_direction != usize::from(HUMAN_DIRECTION_NONE)
+                && incoming_direction != direction
+            {
+                HUMAN_TURN_PENALTY
             } else {
-                let slot = open.len();
-                open.push(Some(successor));
-                open_slot[neighbor_index] = Some(slot);
-                open_count += 1;
+                0.0
+            };
+            let tentative =
+                current.g_score + tile_step_cost(grid, neighbor_index, goal_index) + turn_cost;
+            if tentative >= workspace.score(neighbor_state) {
+                continue;
             }
+            workspace.set_score(neighbor_state, tentative, current.state);
+            workspace.directions[neighbor_state] =
+                u8::try_from(direction).expect("grid direction fits in u8");
+            let estimate = grid_heuristic(neighbor, goal, diagonal);
+            workspace.push(
+                neighbor_state,
+                tentative,
+                weight.mul_add(estimate, tentative),
+            );
         }
-
-        open[current_slot] = None;
-        open_slot[current_index] = None;
-        open_count -= 1;
-        closed[current_index] = Some(current);
     }
     PathResult::Unreachable { visited }
 }
 
-fn kd_heuristic(position: Position, goal: Position) -> f64 {
-    let dx = f64::from(i32::from(position.x) - i32::from(goal.x));
-    let dy = f64::from(i32::from(position.y) - i32::from(goal.y));
-    let squared_delta = [dx * dx, dy * dy];
-    0.1 * (squared_delta[0] + squared_delta[1] - squared_delta[0].min(squared_delta[1]) / 2.0)
+fn quality_grid_path(
+    grid: &Grid,
+    start_index: usize,
+    goal_index: usize,
+    max_visited: u32,
+    diagonal: bool,
+    workspace: &mut GridPathWorkspace,
+) -> PathResult {
+    let tile_count = grid.tiles().len();
+    let field = workspace.quality_field(tile_count, goal_index, diagonal);
+    if field.settled[start_index] {
+        return PathResult::Found(reconstruct_quality_path(
+            grid,
+            field,
+            start_index,
+            goal_index,
+        ));
+    }
+    let mut visited = 0_u32;
+    while let Some(current) = field.open.pop() {
+        if field.distances[current.state].total_cmp(&current.g_score) != Ordering::Equal
+            || field.settled[current.state]
+        {
+            continue;
+        }
+        if visited >= max_visited {
+            field.open.push(current);
+            return PathResult::BudgetExceeded { visited };
+        }
+        field.settled[current.state] = true;
+        visited += 1;
+        let is_source = current.state == start_index;
+        let source_is_blocked =
+            is_source && !grid.is_walkable(grid.position(start_index).expect("validated source"));
+        if !source_is_blocked {
+            let current_position = grid.position(current.state).expect("validated field node");
+            let step_cost = tile_step_cost(grid, current.state, goal_index);
+            for (dx, dy) in GRID_NEIGHBORS {
+                if !diagonal && dx != 0 && dy != 0 {
+                    continue;
+                }
+                let Some(predecessor) = current_position.offset(dx, dy) else {
+                    continue;
+                };
+                let Some(predecessor_index) = grid.index(predecessor) else {
+                    continue;
+                };
+                if predecessor_index != start_index && !grid.is_walkable(predecessor) {
+                    continue;
+                }
+                let tentative = current.g_score + step_cost;
+                if tentative >= field.distances[predecessor_index] {
+                    continue;
+                }
+                field.distances[predecessor_index] = tentative;
+                field.next[predecessor_index] = current.state;
+                field.sequence = field.sequence.wrapping_add(1);
+                field.open.push(SearchNode {
+                    state: predecessor_index,
+                    f_score: tentative,
+                    g_score: tentative,
+                    sequence: field.sequence,
+                });
+            }
+        }
+        if is_source {
+            return PathResult::Found(reconstruct_quality_path(
+                grid,
+                field,
+                start_index,
+                goal_index,
+            ));
+        }
+    }
+    PathResult::Unreachable { visited }
 }
 
-fn reconstruct_kd_path(
+fn tile_step_cost(grid: &Grid, index: usize, goal_index: usize) -> f64 {
+    if index == goal_index {
+        1.0
+    } else {
+        1.0 + f64::from(grid.tiles()[index] >> 1) / 4.0
+    }
+}
+
+fn grid_heuristic(position: Position, goal: Position, diagonal: bool) -> f64 {
+    let dx = u32::from(position.x.abs_diff(goal.x));
+    let dy = u32::from(position.y.abs_diff(goal.y));
+    f64::from(if diagonal {
+        dx.max(dy)
+    } else {
+        dx.saturating_add(dy)
+    })
+}
+
+fn reconstruct_workspace_path(
     grid: &Grid,
-    closed: &[Option<KdOpenNode>],
-    start_index: usize,
-    current_index: usize,
+    workspace: &GridPathWorkspace,
+    start_state: usize,
+    mut current_state: usize,
 ) -> Vec<Position> {
-    let mut index = current_index;
     let mut reversed = Vec::new();
     loop {
-        let node = closed[index].expect("current and parent nodes are closed");
-        reversed.push(node.position);
-        if index == start_index {
+        reversed.push(grid.position(current_state).expect("validated path state"));
+        if current_state == start_state {
             break;
         }
-        let Some(parent) = node.parent else {
-            break;
-        };
-        index = parent;
+        current_state = workspace.parents[current_state];
+        debug_assert_ne!(current_state, NO_PARENT);
     }
     reversed.reverse();
-    debug_assert_eq!(reversed.first(), grid.position(start_index).as_ref());
     reversed
+}
+
+fn reconstruct_quality_path(
+    grid: &Grid,
+    field: &QualityField,
+    start_index: usize,
+    goal_index: usize,
+) -> Vec<Position> {
+    let mut path = Vec::new();
+    let mut current = start_index;
+    for _ in 0..=grid.tiles().len() {
+        path.push(grid.position(current).expect("validated quality path"));
+        if current == goal_index {
+            return path;
+        }
+        current = field.next[current];
+        debug_assert_ne!(current, NO_PARENT);
+    }
+    unreachable!("quality path contains a cycle")
 }
 
 fn reconstruct_path(
@@ -374,7 +671,10 @@ fn reconstruct_path(
 mod tests {
     use crate::model::{Grid, Position};
 
-    use super::{PathResult, find_grid_path, find_path};
+    use super::{
+        GridPathWorkspace, PathResult, PathfindingMode, find_grid_path,
+        find_grid_path_with_workspace, find_path,
+    };
 
     #[test]
     fn routes_around_wall() {
@@ -436,5 +736,121 @@ mod tests {
         };
         assert_eq!(path.first(), Some(&Position::new(0, 1)));
         assert_eq!(path.last(), Some(&Position::new(4, 1)));
+    }
+
+    #[test]
+    fn quality_mode_finds_the_lowest_weight_route_and_reuses_its_field() {
+        let mut tiles = vec![0; 7 * 5];
+        for x in 2..5 {
+            tiles[x + 2 * 7] = 40 << 1;
+        }
+        let grid = Grid::from_tiles(7, 5, tiles).expect("weighted grid");
+        let mut workspace = GridPathWorkspace::default();
+        let PathResult::Found(path) = find_grid_path_with_workspace(
+            &grid,
+            Position::new(1, 2),
+            Position::new(5, 2),
+            100,
+            false,
+            PathfindingMode::Quality,
+            &mut workspace,
+        ) else {
+            panic!("expected quality path");
+        };
+        assert!(
+            path.iter()
+                .all(|position| position.y != 2 || position.x < 2 || position.x > 4)
+        );
+
+        // The first reverse destination search settled this nearer source, so
+        // the same goal can be answered without any new node visits.
+        assert!(matches!(
+            find_grid_path_with_workspace(
+                &grid,
+                Position::new(4, 2),
+                Position::new(5, 2),
+                0,
+                false,
+                PathfindingMode::Quality,
+                &mut workspace,
+            ),
+            PathResult::Found(_)
+        ));
+    }
+
+    #[test]
+    fn fast_mode_stays_within_its_documented_quality_bound() {
+        let mut tiles = vec![0; 9 * 7];
+        for y in 1..6 {
+            tiles[4 + y * 9] = if y == 5 { 0 } else { 24 << 1 };
+        }
+        let grid = Grid::from_tiles(9, 7, tiles).expect("weighted grid");
+        let mut workspace = GridPathWorkspace::default();
+        let PathResult::Found(quality) = find_grid_path_with_workspace(
+            &grid,
+            Position::new(1, 1),
+            Position::new(7, 1),
+            1_000,
+            true,
+            PathfindingMode::Quality,
+            &mut workspace,
+        ) else {
+            panic!("expected quality path");
+        };
+        let PathResult::Found(fast) = find_grid_path_with_workspace(
+            &grid,
+            Position::new(1, 1),
+            Position::new(7, 1),
+            1_000,
+            true,
+            PathfindingMode::Fast,
+            &mut workspace,
+        ) else {
+            panic!("expected fast path");
+        };
+        assert!(path_cost(&grid, &fast) <= path_cost(&grid, &quality) * 1.35);
+    }
+
+    #[test]
+    fn human_mode_prefers_a_stable_heading_on_open_ground() {
+        let grid = Grid::new(10, 7).expect("grid");
+        let mut workspace = GridPathWorkspace::default();
+        let PathResult::Found(path) = find_grid_path_with_workspace(
+            &grid,
+            Position::new(1, 1),
+            Position::new(8, 5),
+            1_000,
+            true,
+            PathfindingMode::Human,
+            &mut workspace,
+        ) else {
+            panic!("expected human path");
+        };
+        let directions: Vec<_> = path
+            .windows(2)
+            .map(|step| {
+                (
+                    step[1].x.saturating_sub(step[0].x),
+                    step[1].y.saturating_sub(step[0].y),
+                )
+            })
+            .collect();
+        assert!(
+            directions
+                .windows(2)
+                .filter(|pair| pair[0] != pair[1])
+                .count()
+                <= 1
+        );
+    }
+
+    fn path_cost(grid: &Grid, path: &[Position]) -> f64 {
+        path.iter()
+            .skip(1)
+            .map(|position| {
+                let index = grid.index(*position).expect("path tile");
+                1.0 + f64::from(grid.tiles()[index] >> 1) / 4.0
+            })
+            .sum()
     }
 }

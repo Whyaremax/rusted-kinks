@@ -10,9 +10,15 @@ import initWasm, {
 
 const bundlePath = process.argv[2];
 const iterations = Number.parseInt(process.argv[3] ?? "1000", 10);
-if (bundlePath === undefined || !Number.isSafeInteger(iterations) || iterations < 1) {
+const pathfindingMode = process.argv[4] ?? "fast";
+if (
+  bundlePath === undefined ||
+  !Number.isSafeInteger(iterations) ||
+  iterations < 1 ||
+  !["quality", "fast", "human"].includes(pathfindingMode)
+) {
   throw new Error(
-    "Usage: node scripts/benchmark-native-pathfinding.mjs <main.js> [iterations]"
+    "Usage: node scripts/benchmark-native-pathfinding.mjs <main.js> [iterations] [quality|fast|human]"
   );
 }
 
@@ -33,7 +39,7 @@ const native = createKinkyDungeonPathfindingHandler(bridge, {
   effectTagsAt: () => undefined,
   playerPosition: () => ({ x: -1, y: -1 }),
   openDoorTiles: () => []
-});
+}, () => pathfindingMode);
 
 const args = [
   1,
@@ -78,6 +84,7 @@ console.log(
   JSON.stringify(
     {
       upstream: "KinkyDungeonFindPath extracted from supplied main.js",
+      pathfindingMode,
       dimensions: { width, height },
       iterations,
       javascriptMilliseconds: round(jsMilliseconds),
@@ -193,6 +200,11 @@ function verifyParity(upstreamPath, nativePath, baseArgs, mapData, count) {
     }
   }
   let checked = 0;
+  let exactMatches = 0;
+  let lengthMatches = 0;
+  let reachabilityMismatches = 0;
+  let invalidJavaScriptPaths = 0;
+  let invalidNativePaths = 0;
   for (let index = 0; index < count; index += 1) {
     const start = walkable[(index * 37 + 3) % walkable.length];
     const goal = walkable[(index * 83 + 19) % walkable.length];
@@ -206,17 +218,86 @@ function verifyParity(upstreamPath, nativePath, baseArgs, mapData, count) {
     fixtureArgs[3] = goal.y;
     const expected = upstreamPath(...fixtureArgs);
     const actual = nativePath(...fixtureArgs);
-    if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-      throw new Error(
-        `Path parity failed for ${start.x},${start.y} -> ${goal.x},${goal.y}: ` +
-          `JS=${JSON.stringify(expected)} native=${JSON.stringify(actual)}`
-      );
+    const expectedReachable = Array.isArray(expected);
+    const actualReachable = Array.isArray(actual);
+    if (expectedReachable !== actualReachable) {
+      reachabilityMismatches += 1;
+    }
+    if (
+      expectedReachable &&
+      !isValidPath(expected, start, goal, mapData, !Boolean(fixtureArgs[14]))
+    ) {
+      invalidJavaScriptPaths += 1;
+    }
+    if (
+      actualReachable &&
+      !isValidPath(actual, start, goal, mapData, !Boolean(fixtureArgs[14]))
+    ) {
+      invalidNativePaths += 1;
+    }
+    if (JSON.stringify(actual) === JSON.stringify(expected)) {
+      exactMatches += 1;
+    }
+    if (
+      expectedReachable &&
+      actualReachable &&
+      expected.length === actual.length
+    ) {
+      lengthMatches += 1;
     }
     checked += 1;
   }
-  return {
+  const result = {
     requested: count,
     checked,
-    exactMatches: checked
+    exactMatches,
+    lengthMatches,
+    reachabilityMismatches,
+    invalidJavaScriptPaths,
+    invalidNativePaths
   };
+  if (
+    reachabilityMismatches !== 0 ||
+    invalidJavaScriptPaths !== 0 ||
+    invalidNativePaths !== 0
+  ) {
+    throw new Error(`Path compatibility failed: ${JSON.stringify(result)}`);
+  }
+  return result;
+}
+
+function isValidPath(path, start, goal, mapData, diagonal) {
+  if (!Array.isArray(path)) {
+    return false;
+  }
+  if (path.length === 0) {
+    return start.x === goal.x && start.y === goal.y;
+  }
+  let previous = start;
+  for (const position of path) {
+    if (
+      position === null ||
+      !Number.isInteger(position.x) ||
+      !Number.isInteger(position.y)
+    ) {
+      return false;
+    }
+    const dx = Math.abs(position.x - previous.x);
+    const dy = Math.abs(position.y - previous.y);
+    if (
+      (dx === 0 && dy === 0) ||
+      dx > 1 ||
+      dy > 1 ||
+      (!diagonal && dx !== 0 && dy !== 0)
+    ) {
+      return false;
+    }
+    const tile =
+      mapData.Grid[position.x + position.y * (mapData.GridWidth + 1)];
+    if (tile !== "." && (position.x !== goal.x || position.y !== goal.y)) {
+      return false;
+    }
+    previous = position;
+  }
+  return previous.x === goal.x && previous.y === goal.y;
 }

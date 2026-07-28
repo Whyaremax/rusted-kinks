@@ -1,4 +1,5 @@
 #include "Patcher.h"
+#include "SourcePatches.h"
 
 #include <QDir>
 #include <QFile>
@@ -16,6 +17,15 @@ void writeFile(const QString& path, const QByteArray& bytes)
     QFile file(path);
     QVERIFY2(file.open(QIODevice::WriteOnly), qPrintable(file.errorString()));
     QCOMPARE(file.write(bytes), bytes.size());
+}
+
+QByteArray readFile(const QString& path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        return {};
+    }
+    return file.readAll();
 }
 
 struct Fixture {
@@ -43,6 +53,18 @@ class PatcherTests final : public QObject {
     Q_OBJECT
 
 private slots:
+    void recognizesOnlyTheExactSourcePatchHashes()
+    {
+        QVERIFY(kd::isKnownSourceBundle(kd::sourcePatchInputSha256()));
+        QVERIFY(kd::isKnownSourceBundle(kd::sourcePatchOutputSha256()));
+        QVERIFY(!kd::isKnownSourceBundle(QStringLiteral("not-a-bundle")));
+        const kd::SourcePatchResult unknown = kd::applyKnownSourcePatch(
+            QByteArray("fixture bundle\n"), QStringLiteral("not-a-bundle"));
+        QVERIFY(!unknown.applied);
+        QVERIFY(unknown.bytes.isEmpty());
+        QVERIFY(unknown.manifest.isEmpty());
+    }
+
     void installsIdempotentlyAndRestoresExactIndex()
     {
         Fixture fixture;
@@ -101,6 +123,40 @@ private slots:
                                  std::runtime_error);
         QCOMPARE(kd::Patcher::status(fixture.appRoot).state,
                  kd::PatcherState::NotInstalled);
+    }
+
+    void updatesPlannerModeAndKeepsOriginalBackup()
+    {
+        Fixture fixture;
+        const QByteArray original =
+            readFile(fixture.appRoot + QStringLiteral("/index.html"));
+        kd::PatcherStatus installed;
+        try {
+            installed = kd::Patcher::install(
+                fixture.appRoot, true, QStringLiteral("quality"));
+            installed = kd::Patcher::updatePathfindingMode(
+                fixture.appRoot, QStringLiteral("human"));
+        } catch (const std::exception& error) {
+            QFAIL(error.what());
+        }
+        QCOMPARE(installed.state, kd::PatcherState::Installed);
+        QCOMPARE(installed.manifest.value(QStringLiteral("settings"))
+                     .toObject()
+                     .value(QStringLiteral("pathfindingMode"))
+                     .toString(),
+                 QStringLiteral("human"));
+        QFile index(fixture.appRoot + QStringLiteral("/index.html"));
+        QVERIFY(index.open(QIODevice::ReadOnly));
+        QVERIFY(index.readAll().contains("\"pathfindingMode\":\"human\""));
+        index.close();
+        try {
+            kd::Patcher::uninstall(fixture.appRoot);
+        } catch (const std::exception& error) {
+            QFAIL(error.what());
+        }
+        QCOMPARE(readFile(fixture.appRoot + QStringLiteral("/index.html")),
+                 original);
+        QCOMPARE(readFile(fixture.saveSentinel), QByteArray("do-not-touch"));
     }
 
     void refusesToRemoveModifiedPayload()

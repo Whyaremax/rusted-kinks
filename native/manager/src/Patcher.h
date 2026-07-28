@@ -19,6 +19,7 @@ struct Inspection {
     QString gameVersion;
     QString packageVersion;
     bool knownBundle = false;
+    bool sourcePatched = false;
 };
 
 struct PatcherStatus {
@@ -34,7 +35,12 @@ public:
     static Inspection inspect(const QString& selectedPath);
     static PatcherStatus status(const QString& selectedPath);
     static PatcherStatus install(const QString& selectedPath,
-                                 bool allowUnknownBundle = false);
+                                 bool allowUnknownBundle = false,
+                                 const QString& pathfindingMode =
+                                     QStringLiteral("fast"));
+    static PatcherStatus updatePathfindingMode(
+        const QString& selectedPath,
+        const QString& pathfindingMode);
     static PatcherStatus uninstall(const QString& selectedPath);
     static QJsonObject toJson(const PatcherStatus& value);
     static QString stateName(PatcherState state);

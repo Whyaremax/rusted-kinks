@@ -1,0 +1,2556 @@
+diff --git a/out/main.js b/out/main.js
+index 0fbf1bd..a4c0f27 100644
+--- a/out/main.js
++++ b/out/main.js
+@@ -11430,7 +11430,84 @@ function KDGetTileWeight(mapTile, tags, tagCounts, tagModifiers) {
+     }
+     return weight;
+ }
++const KDHybridMapTileFillingCoordinateReuseDependencies = {
++    checkMapTileFilling: KDCheckMapTileFilling,
++    looseIndexRankingSuspend: KDLooseIndexRankingSuspend,
++    getPrototypeOf: Object.getPrototypeOf,
++    objectPrototype: Object.prototype,
++    stringIncludes: String.prototype.includes,
++};
++function KDHybridMapTileFillingCoordinateReusePlainObject(value) {
++    const prototype = Object.getPrototypeOf(value);
++    return prototype === Object.prototype || prototype === null;
++}
++function KDHybridMapTileFillingCoordinateReuseCompatible(indices, requiredAccess, indexFilled, sourceControl) {
++    return !sourceControl?.disableMapTileFillingCoordinateReuse
++        && !KDModsLoaded
++        && KDAllModFiles.length === 0
++        && KDCheckMapTileFilling === KDHybridMapTileFillingCoordinateReuseDependencies.checkMapTileFilling
++        && KDLooseIndexRankingSuspend === KDHybridMapTileFillingCoordinateReuseDependencies.looseIndexRankingSuspend
++        && Object.getPrototypeOf === KDHybridMapTileFillingCoordinateReuseDependencies.getPrototypeOf
++        && Object.prototype === KDHybridMapTileFillingCoordinateReuseDependencies.objectPrototype
++        && String.prototype.includes === KDHybridMapTileFillingCoordinateReuseDependencies.stringIncludes
++        && KDHybridMapTileFillingCoordinateReusePlainObject(indices)
++        && KDHybridMapTileFillingCoordinateReusePlainObject(requiredAccess)
++        && KDHybridMapTileFillingCoordinateReusePlainObject(indexFilled);
++}
++function KDHybridCheckMapTileFillingCoordinateReuse(mapTile, indX, indY, indices, requiredAccess, indexFilled, sourceStats) {
++    if (sourceStats)
++        sourceStats.fitChecks = (sourceStats.fitChecks || 0) + 1;
++    let passCount = 0;
++    for (let xx = 1; xx <= mapTile.w; xx++)
++        for (let yy = 1; yy <= mapTile.h; yy++) {
++            let fail = false;
++            const location = (xx + indX - 1) + ',' + (yy + indY - 1);
++            const indexAtLocation = indices[location];
++            let ind = mapTile.index[xx + ',' + yy];
++            if (indexAtLocation == undefined)
++                return false;
++            if (ind != indexAtLocation && KDLooseIndexRankingSuspend(indexAtLocation, ind, mapTile.w, mapTile.h, xx, yy)) {
++                if (mapTile.flexEdge && mapTile.flexEdge[xx + ',' + yy] && ((mapTile.flexEdgeSuper && mapTile.flexEdgeSuper[xx + ',' + yy]) || ((yy > 1
++                    || !indexAtLocation.includes('u')
++                    || indexFilled[(xx + indX - 1) + ',' + (yy + indY - 1 - 1)] != undefined)
++                    && (yy < mapTile.h
++                        || !indexAtLocation.includes('d')
++                        || indexFilled[(xx + indX - 1) + ',' + (yy + indY - 1 + 1)] != undefined)
++                    && (xx < mapTile.w
++                        || !indexAtLocation.includes('l')
++                        || indexFilled[(xx + indX - 1 - 1) + ',' + (yy + indY - 1)] != undefined)
++                    && (xx > 1
++                        || !indexAtLocation.includes('r')
++                        || indexFilled[(xx + indX - 1 + 1) + ',' + (yy + indY - 1)] != undefined))))
++                    fail = true;
++                else
++                    return false;
++            }
++            if (indexFilled[location])
++                return false;
++            if (mapTile.w != 1 || mapTile.h != 1 || (mapTile.inaccessible && mapTile.inaccessible.length > 0)) {
++                if (requiredAccess[location])
++                    return false;
++            }
++            if (!fail)
++                passCount += 1;
++        }
++    return passCount > 0;
++}
++globalThis.KDHybridSourcePatches =
++    globalThis.KDHybridSourcePatches || {};
++globalThis.KDHybridSourcePatches.mapTileFillingCoordinateReuse =
++    "5.4.92-source-v1";
+ function KD_GetMapTile(index, indX, indY, tilesFilled, indexFilled, tagCounts, requiredAccess, globalTags, indices, tagModifiers) {
++    const sourceControl = globalThis.KDHybridSourcePatchControl;
++    const sourceCoordinateReuse =
++        KDHybridMapTileFillingCoordinateReuseCompatible(indices, requiredAccess, indexFilled, sourceControl);
++    const sourceStats = sourceControl?.mapTileFillingCoordinateReuseStats;
++    if (sourceStats) {
++        sourceStats.calls = (sourceStats.calls || 0) + 1;
++        const key = sourceCoordinateReuse ? "optimizedCalls" : "fallbackCalls";
++        sourceStats[key] = (sourceStats[key] || 0) + 1;
++    }
+     let tagList = {
+         "1,1": KDAggregateTileTags(indX, indY, 1, 1, tilesFilled, globalTags),
+     };
+@@ -11444,7 +11521,9 @@ function KD_GetMapTile(index, indX, indY, tilesFilled, indexFilled, tagCounts, r
+                 && mapTile.flexEdge['1,1']
+                 && (mapTile.primInd.includes(index)
+                     || (mapTile.flexEdgeSuper && mapTile.flexEdgeSuper['1,1'])))) {
+-            if (!KDCheckMapTileFilling(mapTile, indX, indY, indices, requiredAccess, indexFilled))
++            if (!(sourceCoordinateReuse
++                ? KDHybridCheckMapTileFillingCoordinateReuse(mapTile, indX, indY, indices, requiredAccess, indexFilled, sourceStats)
++                : KDCheckMapTileFilling(mapTile, indX, indY, indices, requiredAccess, indexFilled)))
+                 continue;
+             if (!KDCheckMapTileAccess(mapTile, indX, indY, indexFilled, requiredAccess))
+                 continue;
+@@ -11559,10 +11638,98 @@ function KDCheckMapTileAccess(mapTile, indX, indY, indexFilled, _requiredAccess)
+     }
+     return true;
+ }
++const KDHybridPasteTileSerializedCacheDependencies = {
++    jsonParse: JSON.parse,
++    jsonStringify: JSON.stringify,
++    weakMap: WeakMap,
++    weakMapGet: WeakMap.prototype.get,
++    weakMapSet: WeakMap.prototype.set,
++    getPrototypeOf: Object.getPrototypeOf,
++    objectPrototype: Object.prototype,
++};
++let KDHybridPasteTileSerializedCacheCatalog = null;
++let KDHybridPasteTileSerializedCache = new WeakMap();
++function KDHybridPasteTileSerializedCachePlainObject(value) {
++    if (value === null || typeof value !== "object")
++        return false;
++    const prototype = Object.getPrototypeOf(value);
++    return prototype === Object.prototype || prototype === null;
++}
++function KDHybridPasteTileSerializedCacheCompatible(tile, sourceControl) {
++    return !sourceControl?.disablePasteTileSerializedCache
++        && !KDModsLoaded
++        && KDAllModFiles.length === 0
++        && KinkyDungeonState !== "TileEditor"
++        && JSON.parse === KDHybridPasteTileSerializedCacheDependencies.jsonParse
++        && JSON.stringify === KDHybridPasteTileSerializedCacheDependencies.jsonStringify
++        && WeakMap === KDHybridPasteTileSerializedCacheDependencies.weakMap
++        && WeakMap.prototype.get === KDHybridPasteTileSerializedCacheDependencies.weakMapGet
++        && WeakMap.prototype.set === KDHybridPasteTileSerializedCacheDependencies.weakMapSet
++        && Object.getPrototypeOf === KDHybridPasteTileSerializedCacheDependencies.getPrototypeOf
++        && Object.prototype === KDHybridPasteTileSerializedCacheDependencies.objectPrototype
++        && KDHybridPasteTileSerializedCachePlainObject(KDMapTilesList)
++        && KDHybridPasteTileSerializedCachePlainObject(tile)
++        && typeof tile.name === "string"
++        && KDMapTilesList[tile.name] === tile;
++}
++function KDHybridInvalidatePasteTileSerializedCache() {
++    if (KDHybridPasteTileSerializedCacheCatalog !== null) {
++        KDHybridPasteTileSerializedCacheCatalog = null;
++        KDHybridPasteTileSerializedCache = new WeakMap();
++    }
++}
++function KDHybridClonePasteTileFromSerializedCache(tile, sourceControl, sourceStats) {
++    if (KDHybridPasteTileSerializedCacheCatalog !== KDMapTilesList) {
++        KDHybridPasteTileSerializedCacheCatalog = KDMapTilesList;
++        KDHybridPasteTileSerializedCache = new WeakMap();
++        if (sourceStats)
++            sourceStats.cacheResets = (sourceStats.cacheResets || 0) + 1;
++    }
++    let serialized = KDHybridPasteTileSerializedCache.get(tile);
++    if (serialized === undefined) {
++        serialized = JSON.stringify(tile);
++        KDHybridPasteTileSerializedCache.set(tile, serialized);
++        if (sourceStats)
++            sourceStats.misses = (sourceStats.misses || 0) + 1;
++    }
++    else {
++        if (sourceStats)
++            sourceStats.hits = (sourceStats.hits || 0) + 1;
++        if (sourceControl?.verifyPasteTileSerializedCache) {
++            const currentSerialized = JSON.stringify(tile);
++            if (sourceStats)
++                sourceStats.verifications = (sourceStats.verifications || 0) + 1;
++            if (currentSerialized !== serialized) {
++                if (sourceStats)
++                    sourceStats.mismatches = (sourceStats.mismatches || 0) + 1;
++                serialized = currentSerialized;
++                KDHybridPasteTileSerializedCache.set(tile, serialized);
++            }
++        }
++    }
++    return JSON.parse(serialized);
++}
++globalThis.KDHybridSourcePatches =
++    globalThis.KDHybridSourcePatches || {};
++globalThis.KDHybridSourcePatches.pasteTileSerializedCache =
++    "5.4.92-source-v1";
+ function KD_PasteTile(tile, x, y, data) {
+     let tileWidth = KDTE_Scale * tile.w;
+     let tileHeight = KDTE_Scale * tile.h;
+-    tile = JSON.parse(JSON.stringify(tile));
++    const sourceControl = globalThis.KDHybridSourcePatchControl;
++    const sourceSerializedCache =
++        KDHybridPasteTileSerializedCacheCompatible(tile, sourceControl);
++    const sourceStats = sourceControl?.pasteTileSerializedCacheStats;
++    if (sourceStats) {
++        sourceStats.calls = (sourceStats.calls || 0) + 1;
++        const key = sourceSerializedCache ? "optimizedCalls" : "fallbackCalls";
++        sourceStats[key] = (sourceStats[key] || 0) + 1;
++    }
++    if (!sourceSerializedCache)
++        KDHybridInvalidatePasteTileSerializedCache();
++    tile = sourceSerializedCache
++        ? KDHybridClonePasteTileFromSerializedCache(tile, sourceControl, sourceStats)
++        : JSON.parse(JSON.stringify(tile));
+     let MazeSeeds = [];
+     let MazeBlock = [];
+     for (let xx = 0; xx < tileWidth; xx++)
+@@ -19329,7 +19496,157 @@ function KDLowPriorityNavMesh() {
+         }
+     }
+ }
++const KDHybridAccessibleQueueDependencies = {
++    object: Object,
++    objectEntries: Object.entries,
++    objectKeys: Object.keys,
++    array: Array,
++    arrayPush: Array.prototype.push,
++    number: Number,
++    numberIsInteger: Number.isInteger,
++    uint8Array: Uint8Array,
++    stringIncludes: String.prototype.includes,
++    stringReplace: String.prototype.replace,
++    mapGet: KinkyDungeonMapGet,
++    tilesGet: KinkyDungeonTilesGet,
++};
++function KDHybridAccessibleQueueCompatible(sourceControl) {
++    return !sourceControl?.disableAccessibleQueue
++        && !KDModsLoaded
++        && KDAllModFiles.length === 0
++        && Object === KDHybridAccessibleQueueDependencies.object
++        && Object.entries === KDHybridAccessibleQueueDependencies.objectEntries
++        && Object.keys === KDHybridAccessibleQueueDependencies.objectKeys
++        && Array === KDHybridAccessibleQueueDependencies.array
++        && Array.prototype.push === KDHybridAccessibleQueueDependencies.arrayPush
++        && String.prototype.includes === KDHybridAccessibleQueueDependencies.stringIncludes
++        && String.prototype.replace === KDHybridAccessibleQueueDependencies.stringReplace
++        && KinkyDungeonMapGet === KDHybridAccessibleQueueDependencies.mapGet
++        && KinkyDungeonTilesGet === KDHybridAccessibleQueueDependencies.tilesGet;
++}
++function KDHybridAccessibleNumericStateCompatible(startX, startY, testX, testY, sourceControl) {
++    const width = KDMapData?.GridWidth;
++    const height = KDMapData?.GridHeight;
++    const cellCount = width * height;
++    return !sourceControl?.disableAccessibleNumericState
++        && Number === KDHybridAccessibleQueueDependencies.number
++        && Number.isInteger === KDHybridAccessibleQueueDependencies.numberIsInteger
++        && Uint8Array === KDHybridAccessibleQueueDependencies.uint8Array
++        && Number.isInteger(width)
++        && Number.isInteger(height)
++        && width > 0
++        && height > 0
++        && Number.isInteger(cellCount)
++        && cellCount <= 1000000
++        && Number.isInteger(startX)
++        && Number.isInteger(startY)
++        && startX >= 0
++        && startX < width
++        && startY >= 0
++        && startY < height
++        && (testX == undefined || Number.isInteger(testX))
++        && (testY == undefined || Number.isInteger(testY));
++}
++globalThis.KDHybridSourcePatches =
++    globalThis.KDHybridSourcePatches || {};
++globalThis.KDHybridSourcePatches.accessibleQueue =
++    "5.4.92-source-v1";
++globalThis.KDHybridSourcePatches.accessibleNumericState =
++    "5.4.92-source-v1";
+ function KinkyDungeonGetAccessible(startX, startY, testX, testY) {
++    const sourceControl = globalThis.KDHybridSourcePatchControl;
++    const sourceQueue = KDHybridAccessibleQueueCompatible(sourceControl);
++    const numericState = sourceQueue
++        && KDHybridAccessibleNumericStateCompatible(startX, startY, testX, testY, sourceControl);
++    const sourceQueueStats = sourceControl?.accessibleQueueStats;
++    if (sourceQueueStats) {
++        sourceQueueStats.accessibleCalls =
++            (sourceQueueStats.accessibleCalls || 0) + 1;
++        const key = sourceQueue ? "optimizedCalls" : "fallbackCalls";
++        sourceQueueStats[key] = (sourceQueueStats[key] || 0) + 1;
++        const modeKey = numericState
++            ? "numericStateCalls"
++            : sourceQueue
++                ? "queueCalls"
++                : "originalFrontierCalls";
++        sourceQueueStats[modeKey] = (sourceQueueStats[modeKey] || 0) + 1;
++    }
++    if (numericState) {
++        const tempGrid = {};
++        const width = KDMapData.GridWidth;
++        const height = KDMapData.GridHeight;
++        const state = new Uint8Array(width * height);
++        const startIndex = startX + startY * width;
++        state[startIndex] = 2;
++        const queue = [startIndex];
++        for (let checkIndex = 0; checkIndex < queue.length; checkIndex += 1) {
++            const pointIndex = queue[checkIndex];
++            const X = pointIndex % width;
++            const Y = (pointIndex - X) / width;
++            for (let XX = -1; XX <= 1; XX += 1)
++                for (let YY = -1; YY <= 1; YY += 1) {
++                    const nextX = X + XX;
++                    const nextY = Y + YY;
++                    if (nextX > 0 && nextX < width - 1
++                        && nextY > 0 && nextY < height - 1) {
++                        const nextIndex = nextX + nextY * width;
++                        if (state[nextIndex] === 0) {
++                            const testLoc = nextX + "," + nextY;
++                            const tileMetadata = KinkyDungeonTilesGet(testLoc);
++                            const locked = (testX != undefined && testY != undefined
++                                && nextX == testX && nextY == testY)
++                                || (tileMetadata && tileMetadata.Lock);
++                            if (KDInteractableTiles.includes(KinkyDungeonMapGet(nextX, nextY))
++                                && !locked) {
++                                if (KinkyDungeonMovableTilesSmartEnemy.includes(KinkyDungeonMapGet(nextX, nextY))) {
++                                    state[nextIndex] = 3;
++                                    queue.push(nextIndex);
++                                }
++                                else {
++                                    state[nextIndex] = 1;
++                                }
++                                tempGrid[testLoc] = { x: nextX, y: nextY };
++                            }
++                        }
++                    }
++                }
++            state[pointIndex] &= 1;
++        }
++        return tempGrid;
++    }
++    if (sourceQueue) {
++        const tempGrid = {};
++        const checkGrid = {};
++        const startLocation = startX + "," + startY;
++        const startPoint = { x: startX, y: startY };
++        checkGrid[startLocation] = startPoint;
++        const checkLocations = [startLocation];
++        const checkPoints = [startPoint];
++        for (let checkIndex = 0; checkIndex < checkLocations.length; checkIndex += 1) {
++            const checkLocation = checkLocations[checkIndex];
++            const point = checkPoints[checkIndex];
++            const X = point.x;
++            const Y = point.y;
++            for (let XX = -1; XX <= 1; XX += 1)
++                for (let YY = -1; YY <= 1; YY += 1) {
++                    const testLoc = X + XX + "," + (Y + YY);
++                    const locked = (testX != undefined && testY != undefined && X + XX == testX && Y + YY == testY)
++                        || (KinkyDungeonTilesGet("" + (X + XX) + "," + (Y + YY)) && KinkyDungeonTilesGet("" + (X + XX) + "," + (Y + YY)).Lock);
++                    if (!checkGrid[testLoc] && !tempGrid[testLoc] && X + XX > 0 && X + XX < KDMapData.GridWidth - 1 && Y + YY > 0 && Y + YY < KDMapData.GridHeight - 1
++                        && KDInteractableTiles.includes(KinkyDungeonMapGet(X + XX, Y + YY)) && !locked) {
++                        if (KinkyDungeonMovableTilesSmartEnemy.includes(KinkyDungeonMapGet(X + XX, Y + YY))) {
++                            const nextPoint = { x: X + XX, y: Y + YY };
++                            checkGrid[testLoc] = nextPoint;
++                            checkLocations.push(testLoc);
++                            checkPoints.push(nextPoint);
++                        }
++                        tempGrid[testLoc] = { x: X + XX, y: Y + YY };
++                    }
++                }
++            delete checkGrid[checkLocation];
++        }
++        return tempGrid;
++    }
+     let tempGrid = {};
+     let checkGrid = {};
+     checkGrid[(startX + "," + startY)] = { x: startX, y: startY };
+@@ -19355,6 +19672,94 @@ function KinkyDungeonGetAccessible(startX, startY, testX, testY) {
+     return tempGrid;
+ }
+ function KinkyDungeonGetAccessibleRoom(startX, startY) {
++    const sourceControl = globalThis.KDHybridSourcePatchControl;
++    const sourceQueue = KDHybridAccessibleQueueCompatible(sourceControl);
++    const numericState = sourceQueue
++        && KDHybridAccessibleNumericStateCompatible(startX, startY, undefined, undefined, sourceControl);
++    const sourceQueueStats = sourceControl?.accessibleQueueStats;
++    if (sourceQueueStats) {
++        sourceQueueStats.roomCalls =
++            (sourceQueueStats.roomCalls || 0) + 1;
++        const key = sourceQueue ? "optimizedCalls" : "fallbackCalls";
++        sourceQueueStats[key] = (sourceQueueStats[key] || 0) + 1;
++        const modeKey = numericState
++            ? "numericStateCalls"
++            : sourceQueue
++                ? "queueCalls"
++                : "originalFrontierCalls";
++        sourceQueueStats[modeKey] = (sourceQueueStats[modeKey] || 0) + 1;
++    }
++    if (numericState) {
++        const tempGrid = {};
++        const width = KDMapData.GridWidth;
++        const height = KDMapData.GridHeight;
++        const state = new Uint8Array(width * height);
++        const startIndex = startX + startY * width;
++        state[startIndex] = 2;
++        const queue = [startIndex];
++        const MTiles = KinkyDungeonMovableTilesSmartEnemy.replace("D", "").replace("d", "");
++        for (let checkIndex = 0; checkIndex < queue.length; checkIndex += 1) {
++            const pointIndex = queue[checkIndex];
++            const X = pointIndex % width;
++            const Y = (pointIndex - X) / width;
++            for (let XX = -1; XX <= 1; XX += 1)
++                for (let YY = -1; YY <= 1; YY += 1) {
++                    const nextX = X + XX;
++                    const nextY = Y + YY;
++                    if (nextX >= 0 && nextX < width
++                        && nextY >= 0 && nextY < height) {
++                        const nextIndex = nextX + nextY * width;
++                        if (state[nextIndex] === 0
++                            && KDInteractableTiles.includes(KinkyDungeonMapGet(nextX, nextY))) {
++                            const test = nextX + "," + nextY;
++                            if (MTiles.includes(KinkyDungeonMapGet(nextX, nextY))) {
++                                state[nextIndex] = 3;
++                                queue.push(nextIndex);
++                            }
++                            else {
++                                state[nextIndex] = 1;
++                            }
++                            tempGrid[test] = true;
++                        }
++                    }
++                }
++            state[pointIndex] &= 1;
++        }
++        return Object.keys(tempGrid);
++    }
++    if (sourceQueue) {
++        const tempGrid = {};
++        const checkGrid = {};
++        const startLocation = startX + "," + startY;
++        const startPoint = { x: startX, y: startY };
++        checkGrid[startLocation] = startPoint;
++        const checkLocations = [startLocation];
++        const checkPoints = [startPoint];
++        const Tiles = KDInteractableTiles.replace("D", "").replace("d", "");
++        const MTiles = KinkyDungeonMovableTilesSmartEnemy.replace("D", "").replace("d", "");
++        for (let checkIndex = 0; checkIndex < checkLocations.length; checkIndex += 1) {
++            const checkLocation = checkLocations[checkIndex];
++            const point = checkPoints[checkIndex];
++            for (let XX = -1; XX <= 1; XX += 1)
++                for (let YY = -1; YY <= 1; YY += 1) {
++                    const test = point.x + XX + "," + (point.y + YY);
++                    if (!checkGrid[test] && !tempGrid[test] && KDInteractableTiles.includes(KinkyDungeonMapGet(point.x + XX, point.y + YY))) {
++                        if (MTiles.includes(KinkyDungeonMapGet(point.x + XX, point.y + YY))) {
++                            const nextPoint = {
++                                x: point.x + XX,
++                                y: point.y + YY,
++                            };
++                            checkGrid[test] = nextPoint;
++                            checkLocations.push(test);
++                            checkPoints.push(nextPoint);
++                        }
++                        tempGrid[test] = true;
++                    }
++                }
++            delete checkGrid[checkLocation];
++        }
++        return Object.keys(tempGrid);
++    }
+     let tempGrid = {};
+     let checkGrid = {};
+     checkGrid[startX + "," + startY] = { x: startX, y: startY };
+@@ -21725,7 +22130,33 @@ let KDPlaceMode = {
+     MODE_MODIFYPOTENTIALANDEXISTING: 0x1,
+     MODE_MODIFYEXISTINGONLY: 0x2,
+ };
++const KDHybridPlaceDoorsAccessibleReuseDependencies = {
++    getAccessibleRoom: KinkyDungeonGetAccessibleRoom,
++};
++function KDHybridPlaceDoorsAccessibleReuseCompatible(sourceControl) {
++    return !sourceControl?.disablePlaceDoorsAccessibleReuse
++        && KDHybridAccessibleQueueCompatible(sourceControl)
++        && KinkyDungeonGetAccessibleRoom === KDHybridPlaceDoorsAccessibleReuseDependencies.getAccessibleRoom;
++}
++globalThis.KDHybridSourcePatches =
++    globalThis.KDHybridSourcePatches || {};
++globalThis.KDHybridSourcePatches.placeDoorsAccessibleReuse =
++    "5.4.92-source-v1";
+ function KinkyDungeonPlaceDoors(doorchance, doortrapchance, nodoorchance, doorlockchance, trapChance, grateChance, Floor, width, height, placeMode = KDPlaceMode.MODE_PLACENEW) {
++    const sourceControl = globalThis.KDHybridSourcePatchControl;
++    const sourceAccessibleRoomReuse =
++        KDHybridPlaceDoorsAccessibleReuseCompatible(sourceControl);
++    const sourceAccessibleRoomReuseStats =
++        sourceControl?.placeDoorsAccessibleReuseStats;
++    if (sourceAccessibleRoomReuseStats) {
++        sourceAccessibleRoomReuseStats.calls =
++            (sourceAccessibleRoomReuseStats.calls || 0) + 1;
++        const key = sourceAccessibleRoomReuse
++            ? "optimizedCalls"
++            : "fallbackCalls";
++        sourceAccessibleRoomReuseStats[key] =
++            (sourceAccessibleRoomReuseStats[key] || 0) + 1;
++    }
+     let doorlist = [];
+     let doorlist_2ndpass = [];
+     let trapLocations = [];
+@@ -21804,7 +22235,21 @@ function KinkyDungeonPlaceDoors(doorchance, doortrapchance, nodoorchance, doorlo
+                     }
+                 }
+                 let rooms = [];
+-                let room2 = KinkyDungeonGetAccessibleRoom(X, Y);
++                let room2;
++                if (sourceAccessibleRoomReuse) {
++                    room2 = accessible;
++                    if (sourceAccessibleRoomReuseStats) {
++                        sourceAccessibleRoomReuseStats.reuses =
++                            (sourceAccessibleRoomReuseStats.reuses || 0) + 1;
++                    }
++                }
++                else {
++                    room2 = KinkyDungeonGetAccessibleRoom(X, Y);
++                    if (sourceAccessibleRoomReuseStats) {
++                        sourceAccessibleRoomReuseStats.officialCalls =
++                            (sourceAccessibleRoomReuseStats.officialCalls || 0) + 1;
++                    }
++                }
+                 for (let ddoor of roomDoors) {
+                     rooms.push({ door: ddoor, room: room2 });
+                 }
+@@ -38224,7 +38669,34 @@ function KDGetBindAmp(enemy, override) {
+         return override != undefined ? override : KinkyDungeonMultiplicativeStat(-KinkyDungeonGetBuffedStat(KinkyDungeonPlayerBuffs, "BindAmp"));
+     return 1;
+ }
++const KDHybridHelplessFastNegativeDependencies = {
++    unpackEnemy: KDUnPackEnemy,
++    packEnemy: KDPackEnemy,
++    struggleThreshold: KDNPCStruggleThreshMult,
++};
+ function KDHelpless(enemy) {
++    const sourceControl = globalThis.KDHybridSourcePatchControl;
++    const sourceStats = sourceControl?.helplessFastNegativeStats;
++    if (sourceStats)
++        sourceStats.calls = (sourceStats.calls || 0) + 1;
++    const sourceFastPath = !sourceControl?.disableHelplessFastNegative
++        && KDUnPackEnemy === KDHybridHelplessFastNegativeDependencies.unpackEnemy
++        && KDPackEnemy === KDHybridHelplessFastNegativeDependencies.packEnemy
++        && KDNPCStruggleThreshMult === KDHybridHelplessFastNegativeDependencies.struggleThreshold;
++    if (sourceFastPath
++        && enemy
++        && !enemy.player
++        && enemy.Enemy?.maxhp
++        && enemy.hp > 0.52
++        && !(enemy.boundLevel > 0)) {
++        if (sourceStats)
++            sourceStats.fastReturns = (sourceStats.fastReturns || 0) + 1;
++        return false;
++    }
++    if (sourceStats) {
++        const key = sourceFastPath ? "officialCalls" : "compatibilityFallbacks";
++        sourceStats[key] = (sourceStats[key] || 0) + 1;
++    }
+     let packed = KDUnPackEnemy(enemy);
+     let res = enemy && !enemy.player && (enemy.hp <= 0.52 || enemy.boundLevel > KDNPCStruggleThreshMult(enemy) * enemy.Enemy.maxhp) && KDBoundEffects(enemy) > 3;
+     if (packed)
+@@ -38289,6 +38761,77 @@ function KDEnemyVisionRadius(enemy) {
+     KinkyDungeonSendEvent("calcEnemyVision", data);
+     return (data.bonusBefore + data.radius) * data.mult + data.bonusAfter;
+ }
++const KDHybridNearestPlayerDependencies = {
++    hostile: KDHostile,
++    getFaction: KDGetFaction,
++    helpless: KDHelpless,
++    imprisoned: KDIsImprisoned,
++    unpackEnemy: KDUnPackEnemy,
++    packEnemy: KDPackEnemy,
++    getEnemyByName: KinkyDungeonGetEnemyByName,
++    refreshEnemiesCache: KinkyDungeonRefreshEnemiesCache,
++    struggleThreshold: KDNPCStruggleThreshMult,
++    enemyRank: KDEnemyRank,
++    boundEffects: KDBoundEffects,
++    bindEffectMult: KDGetBindEffectMult,
++    entityHasFlag: KDEntityHasFlag,
++    enemyHasFlag: KDEnemyHasFlag,
++    collectionHasFlag: KDCollHasFlag,
++    factionHostile: KDFactionHostile,
++    factionRelation: KDFactionRelation,
++    inParty: KDIsInParty,
++    isServant: KDIsServant,
++    opinionRepMod: KDOpinionRepMod,
++};
++const KDHybridNearestPlayerDefinitions = new WeakMap();
++function KDHybridNearestPlayerCompatible(control) {
++    return !control?.disableNearestPlayer
++        && KDHostile === KDHybridNearestPlayerDependencies.hostile
++        && KDGetFaction === KDHybridNearestPlayerDependencies.getFaction
++        && KDHelpless === KDHybridNearestPlayerDependencies.helpless
++        && KDIsImprisoned === KDHybridNearestPlayerDependencies.imprisoned
++        && KDUnPackEnemy === KDHybridNearestPlayerDependencies.unpackEnemy
++        && KDPackEnemy === KDHybridNearestPlayerDependencies.packEnemy
++        && KinkyDungeonGetEnemyByName === KDHybridNearestPlayerDependencies.getEnemyByName
++        && KinkyDungeonRefreshEnemiesCache === KDHybridNearestPlayerDependencies.refreshEnemiesCache
++        && KDNPCStruggleThreshMult === KDHybridNearestPlayerDependencies.struggleThreshold
++        && KDEnemyRank === KDHybridNearestPlayerDependencies.enemyRank
++        && KDBoundEffects === KDHybridNearestPlayerDependencies.boundEffects
++        && KDGetBindEffectMult === KDHybridNearestPlayerDependencies.bindEffectMult
++        && KDEntityHasFlag === KDHybridNearestPlayerDependencies.entityHasFlag
++        && KDEnemyHasFlag === KDHybridNearestPlayerDependencies.enemyHasFlag
++        && KDCollHasFlag === KDHybridNearestPlayerDependencies.collectionHasFlag
++        && KDFactionHostile === KDHybridNearestPlayerDependencies.factionHostile
++        && KDFactionRelation === KDHybridNearestPlayerDependencies.factionRelation
++        && KDIsInParty === KDHybridNearestPlayerDependencies.inParty
++        && KDIsServant === KDHybridNearestPlayerDependencies.isServant
++        && KDOpinionRepMod === KDHybridNearestPlayerDependencies.opinionRepMod;
++}
++function KDHybridCanonicalTargetHostile(subject, candidate, subjectFaction) {
++    if (subject.rage > 0)
++        return true;
++    if (candidate.ceasefire > 0)
++        return false;
++    const candidateFaction = KDGetFaction(candidate);
++    if (candidateFaction == "Player" && subject.hostile > 0)
++        return true;
++    if (subjectFaction == "Player" && candidate.hostile > 0)
++        return true;
++    if (candidate.rage > 0)
++        return true;
++    if (subjectFaction == "Player" && candidate.allied > 0)
++        return false;
++    if (subjectFaction == "Rage"
++        || candidateFaction == "Rage"
++        || (subjectFaction == "Player" && candidateFaction == "Enemy")
++        || (candidateFaction == "Player" && subjectFaction == "Enemy"))
++        return true;
++    return KDFactionRelation(subjectFaction, candidateFaction) <= -0.5;
++}
++const KDHybridSourcePatches = globalThis.KDHybridSourcePatches || {};
++globalThis.KDHybridSourcePatches = KDHybridSourcePatches;
++KDHybridSourcePatches.nearestPlayer = "5.4.92-source-v1";
++KDHybridSourcePatches.helplessFastNegative = "5.4.92-source-v1";
+ function KinkyDungeonNearestPlayer(enemy, _requireVision, decoy, visionRadius, _AI_Data) {
+     if (enemy && enemy.Enemy && !visionRadius) {
+         visionRadius = KDEnemyVisionRadius(enemy);
+@@ -38303,7 +38846,16 @@ function KinkyDungeonNearestPlayer(enemy, _requireVision, decoy, visionRadius, _
+             pdist = 1.5;
+         let hostile = KDHostile(enemy);
+         let nearestDistance = (hostile) ? pdist - 0.1 : 100000;
+-        if (KDGetFaction(enemy) == "Player"
++        const sourceControl = globalThis.KDHybridSourcePatchControl;
++        const sourceFastPath = KDHybridNearestPlayerCompatible(sourceControl);
++        const sourceStats = sourceControl?.nearestPlayerStats;
++        if (sourceStats) {
++            sourceStats.calls = (sourceStats.calls || 0) + 1;
++            const key = sourceFastPath ? "optimizedCalls" : "fallbackCalls";
++            sourceStats[key] = (sourceStats[key] || 0) + 1;
++        }
++        const enemyFaction = sourceFastPath ? KDGetFaction(enemy) : undefined;
++        if ((sourceFastPath ? enemyFaction : KDGetFaction(enemy)) == "Player"
+             && (KDEnemyHasFlag(enemy, "NoFollow")
+                 || KDEnemyHasFlag(enemy, "StayHere")))
+             nearestDistance = 100000;
+@@ -38312,18 +38864,56 @@ function KinkyDungeonNearestPlayer(enemy, _requireVision, decoy, visionRadius, _
+             for (let e of ent) {
+                 if (e == enemy)
+                     continue;
+-                if (KDHelpless(e) || KDIsImprisoned(e))
+-                    continue;
+-                if (KDGetFaction(e) == "Natural")
+-                    continue;
+-                if (enemy.Enemy.noTargetSilenced && e.silence > 0)
+-                    continue;
+-                if ((e.Enemy && !e.Enemy.noAttack && KDHostile(enemy, e))) {
++                if (sourceStats)
++                    sourceStats.candidates = (sourceStats.candidates || 0) + 1;
++                let commonFiltersComplete = false;
++                const definition = e.Enemy;
++                let canonicalDefinition = sourceFastPath
++                    && !!definition?.maxhp
++                    && !e.player
++                    && KDHybridNearestPlayerDefinitions.get(e) === definition;
++                if (sourceFastPath
++                    && !canonicalDefinition
++                    && definition?.maxhp
++                    && !e.player
++                    && KinkyDungeonGetEnemyByName((definition.name || definition)) === definition) {
++                    KDHybridNearestPlayerDefinitions.set(e, definition);
++                    canonicalDefinition = true;
++                }
++                if (canonicalDefinition) {
++                    if (sourceStats)
++                        sourceStats.canonicalCandidates = (sourceStats.canonicalCandidates || 0) + 1;
++                    if (definition.noAttack
++                        || !KDHybridCanonicalTargetHostile(enemy, e, enemyFaction))
++                        continue;
++                    if (KDHelpless(e) || KDIsImprisoned(e))
++                        continue;
++                }
++                else {
++                    if (sourceStats)
++                        sourceStats.guardedCandidates = (sourceStats.guardedCandidates || 0) + 1;
++                    if (KDHelpless(e) || KDIsImprisoned(e))
++                        continue;
++                    if (KDGetFaction(e) == "Natural")
++                        continue;
++                    if (enemy.Enemy.noTargetSilenced && e.silence > 0)
++                        continue;
++                    commonFiltersComplete = true;
++                    if (!definition || definition.noAttack || !KDHostile(enemy, e))
++                        continue;
++                }
++                if (!commonFiltersComplete) {
++                    if (KDGetFaction(e) == "Natural")
++                        continue;
++                    if (enemy.Enemy.noTargetSilenced && e.silence > 0)
++                        continue;
++                }
++                {
+                     if (e.Enemy?.tags?.scenery && KDAllied(enemy) && !KDEnemyHasFlag(e, "targetedForAttack"))
+                         continue;
+                     let dist = Math.sqrt((e.x - enemy.x) * (e.x - enemy.x)
+                         + (e.y - enemy.y) * (e.y - enemy.y));
+-                    let pdist_enemy = (KDGetFaction(enemy) == "Player"
++                    let pdist_enemy = ((sourceFastPath ? enemyFaction : KDGetFaction(enemy)) == "Player"
+                         && !KDEnemyHasFlag(enemy, "NoFollow")
+                         && !KDEnemyHasFlag(enemy, "StayHere")
+                         && (enemy.Enemy.allied || KDIsInParty(enemy) || (!KDGameData.PrisonerState || KDGameData.PrisonerState == "chase")))
+@@ -60171,7 +60761,200 @@ function KDGeteligrest_gettags(effLevel, enemy, ignoreTags, extraTags) {
+     }
+     return tags;
+ }
+-function KDGetRestraintsEligible(enemy, Level, Index, Bypass, Lock, RequireWill, LeashingOnly, NoStack, extraTags, agnostic, filter, securityEnemy, curse, filterEps = 0.9, minWeightFallback = true, useAugmented = false, augmentedInventory = undefined, options) {
++const KDHybridEligibleRestraintDefinitions = new WeakMap();
++let KDHybridEligibleRestraintCatalog = undefined;
++function KDHybridEligibleRestraintPlainWeights(weights) {
++    if (!weights)
++        return false;
++    const prototype = Object.getPrototypeOf(weights);
++    if (prototype !== Object.prototype && prototype !== null)
++        return false;
++    return Object.values(Object.getOwnPropertyDescriptors(weights)).every((descriptor) => Object.prototype.hasOwnProperty.call(descriptor, "value")
++        && typeof descriptor.value === "number");
++}
++function KDHybridInitializeEligibleRestraintDefinitions() {
++    if (KDHybridEligibleRestraintCatalog)
++        return;
++    KDHybridEligibleRestraintCatalog = KinkyDungeonRestraints;
++    for (const restraintDefinition of KDHybridEligibleRestraintCatalog) {
++        if (KDHybridEligibleRestraintPlainWeights(restraintDefinition.enemyTags)
++            && (!restraintDefinition.enemyTagsMult
++                || KDHybridEligibleRestraintPlainWeights(restraintDefinition.enemyTagsMult)))
++            KDHybridEligibleRestraintDefinitions.set(restraintDefinition, {
++                enemyTags: restraintDefinition.enemyTags,
++                enemyTagsMult: restraintDefinition.enemyTagsMult,
++                enemyTagsPrototype: Object.getPrototypeOf(restraintDefinition.enemyTags),
++                enemyTagsMultPrototype: restraintDefinition.enemyTagsMult
++                    ? Object.getPrototypeOf(restraintDefinition.enemyTagsMult)
++                    : undefined,
++            });
++    }
++}
++const KDHybridEligibleRestraintDependencies = {
++    getTags: KDGeteligrest_gettags,
++    mapGet: Map.prototype.get,
++    mapKeys: Map.prototype.keys,
++    mapHas: Map.prototype.has,
++};
++function KDHybridEligibleRestraintEnemyKeysCompatible(restraintDefinition, sourceControl) {
++    KDHybridInitializeEligibleRestraintDefinitions();
++    const expected = KDHybridEligibleRestraintDefinitions.get(restraintDefinition);
++    return !sourceControl?.disableEligibleRestraintEnemyKeys
++        && KDGeteligrest_gettags === KDHybridEligibleRestraintDependencies.getTags
++        && Map.prototype.get === KDHybridEligibleRestraintDependencies.mapGet
++        && Map.prototype.keys === KDHybridEligibleRestraintDependencies.mapKeys
++        && Map.prototype.has === KDHybridEligibleRestraintDependencies.mapHas
++        && expected?.enemyTags === restraintDefinition.enemyTags
++        && expected?.enemyTagsMult === restraintDefinition.enemyTagsMult
++        && expected?.enemyTagsPrototype === Object.getPrototypeOf(restraintDefinition.enemyTags)
++        && (!restraintDefinition.enemyTagsMult
++            || expected?.enemyTagsMultPrototype === Object.getPrototypeOf(restraintDefinition.enemyTagsMult));
++}
++function KDHybridEligibleRestraintCatalogCompatible(sourceControl) {
++    KDHybridInitializeEligibleRestraintDefinitions();
++    return !sourceControl?.disableEligibleRestraintEnemyKeys
++        && !sourceControl?.disableEligibleRestraintCatalogProof
++        && !KDModsLoaded
++        && KDAllModFiles.length === 0
++        && KinkyDungeonRestraints === KDHybridEligibleRestraintCatalog
++        && KDGeteligrest_gettags === KDHybridEligibleRestraintDependencies.getTags
++        && Map.prototype.get === KDHybridEligibleRestraintDependencies.mapGet
++        && Map.prototype.keys === KDHybridEligibleRestraintDependencies.mapKeys
++        && Map.prototype.has === KDHybridEligibleRestraintDependencies.mapHas;
++}
++const KDHybridEligibleRestraintRetryToken = Symbol("KDHybridEligibleRestraintRetry");
++let KDHybridEligibleRestraintTopLevelCache = undefined;
++const KDHybridEligibleRestraintMultiEntryCapacity = 4;
++const KDHybridEligibleRestraintMultiEntryCache = [];
++const KDHybridEligibleRestraintTopLevelDependencies = {
++    array: Array,
++    arrayFrom: Array.from,
++    arrayIsArray: Array.isArray,
++    arrayPrototype: Array.prototype,
++    arrayPush: Array.prototype.push,
++    arrayShift: Array.prototype.shift,
++    json: JSON,
++    jsonStringify: JSON.stringify,
++    map: Map,
++    mapPrototype: Map.prototype,
++    mapGet: Map.prototype.get,
++    mapKeys: Map.prototype.keys,
++    numberIsFinite: Number.isFinite,
++    object: Object,
++    objectGetOwnPropertyDescriptor: Object.getOwnPropertyDescriptor,
++    objectGetPrototypeOf: Object.getPrototypeOf,
++    objectPrototype: Object.prototype,
++};
++function KDHybridEligibleRestraintMultiEntryCompatible(sourceControl) {
++    return !sourceControl?.disableEligibleRestraintMultiEntryReuse
++        && Array === KDHybridEligibleRestraintTopLevelDependencies.array
++        && Array.prototype === KDHybridEligibleRestraintTopLevelDependencies.arrayPrototype
++        && Array.prototype.push === KDHybridEligibleRestraintTopLevelDependencies.arrayPush
++        && Array.prototype.shift === KDHybridEligibleRestraintTopLevelDependencies.arrayShift;
++}
++const KDHybridEligibleRestraintTopLevelFilterKeys = [
++    "requireTags",
++    "filterGroups",
++    "require",
++];
++function KDHybridEligibleRestraintPlainStringSequence(value) {
++    if (value == undefined)
++        return true;
++    if (!Array.isArray(value)
++        || Object.getPrototypeOf(value) !== Array.prototype)
++        return false;
++    for (let index = 0; index < value.length; index++) {
++        const descriptor = Object.getOwnPropertyDescriptor(value, `${index}`);
++        if (!descriptor
++            || !("value" in descriptor)
++            || typeof descriptor.value !== "string")
++            return false;
++    }
++    return true;
++}
++function KDHybridEligibleRestraintPlainOptions(options) {
++    if (options == undefined)
++        return true;
++    if (Object.getPrototypeOf(options) !== Object.prototype)
++        return false;
++    const descriptor = Object.getOwnPropertyDescriptor(options, "extraOptions");
++    return !descriptor
++        || (("value" in descriptor)
++            && descriptor.value === undefined);
++}
++function KDHybridEligibleRestraintPlainFilter(filter) {
++    if (filter == undefined)
++        return true;
++    if (Object.getPrototypeOf(filter) !== Object.prototype)
++        return false;
++    for (const key of KDHybridEligibleRestraintTopLevelFilterKeys) {
++        const descriptor = Object.getOwnPropertyDescriptor(filter, key);
++        if (descriptor
++            && (!("value" in descriptor)
++                || !KDHybridEligibleRestraintPlainStringSequence(descriptor.value)))
++            return false;
++    }
++    return true;
++}
++function KDHybridEligibleRestraintTopLevelKey(tags, effLevel, Index, filter, arousalMode, sourceControl, sourceStats, options) {
++    if (sourceControl?.disableEligibleRestraintTopLevelReuse
++        || sourceStats?.verifyCatalog === true
++        || Array !== KDHybridEligibleRestraintTopLevelDependencies.array
++        || Array.from !== KDHybridEligibleRestraintTopLevelDependencies.arrayFrom
++        || Array.isArray !== KDHybridEligibleRestraintTopLevelDependencies.arrayIsArray
++        || Array.prototype !== KDHybridEligibleRestraintTopLevelDependencies.arrayPrototype
++        || JSON !== KDHybridEligibleRestraintTopLevelDependencies.json
++        || JSON.stringify !== KDHybridEligibleRestraintTopLevelDependencies.jsonStringify
++        || Map !== KDHybridEligibleRestraintTopLevelDependencies.map
++        || Map.prototype !== KDHybridEligibleRestraintTopLevelDependencies.mapPrototype
++        || Map.prototype.get !== KDHybridEligibleRestraintTopLevelDependencies.mapGet
++        || Map.prototype.keys !== KDHybridEligibleRestraintTopLevelDependencies.mapKeys
++        || Number.isFinite !== KDHybridEligibleRestraintTopLevelDependencies.numberIsFinite
++        || Object !== KDHybridEligibleRestraintTopLevelDependencies.object
++        || Object.getOwnPropertyDescriptor !== KDHybridEligibleRestraintTopLevelDependencies.objectGetOwnPropertyDescriptor
++        || Object.getPrototypeOf !== KDHybridEligibleRestraintTopLevelDependencies.objectGetPrototypeOf
++        || Object.prototype !== KDHybridEligibleRestraintTopLevelDependencies.objectPrototype
++        || Object.getPrototypeOf(tags) !== Map.prototype
++        || tags.get !== KDHybridEligibleRestraintTopLevelDependencies.mapGet
++        || tags.keys !== KDHybridEligibleRestraintTopLevelDependencies.mapKeys
++        || typeof effLevel !== "number"
++        || !Number.isFinite(effLevel)
++        || (typeof Index !== "string"
++            && (typeof Index !== "number" || !Number.isFinite(Index)))
++        || (arousalMode != undefined && typeof arousalMode !== "boolean")
++        || typeof KinkyDungeonNewGame !== "number"
++        || !Number.isFinite(KinkyDungeonNewGame)
++        || !KDHybridEligibleRestraintPlainFilter(filter)
++        || !KDHybridEligibleRestraintPlainOptions(options))
++        return undefined;
++    const tagKeys = Array.from(tags.keys());
++    for (const key of tagKeys)
++        if (typeof key !== "string" || tags.get(key) !== true)
++            return undefined;
++    return JSON.stringify([
++        effLevel,
++        Index,
++        tagKeys,
++        filter?.requireTags,
++        filter?.filterGroups,
++        filter?.require,
++        arousalMode,
++        KinkyDungeonNewGame,
++    ]);
++}
++globalThis.KDHybridSourcePatches =
++    globalThis.KDHybridSourcePatches || {};
++globalThis.KDHybridSourcePatches.eligibleRestraintEnemyKeys =
++    "5.4.92-source-v1";
++globalThis.KDHybridSourcePatches.eligibleRestraintCatalogProof =
++    "5.4.92-source-v1";
++globalThis.KDHybridSourcePatches.eligibleRestraintRetryReuse =
++    "5.4.92-source-v1";
++globalThis.KDHybridSourcePatches.eligibleRestraintTopLevelReuse =
++    "5.4.92-source-v1";
++globalThis.KDHybridSourcePatches.eligibleRestraintMultiEntryReuse =
++    "5.4.92-source-v1";
++function KDGetRestraintsEligible(enemy, Level, Index, Bypass, Lock, RequireWill, LeashingOnly, NoStack, extraTags, agnostic, filter, securityEnemy, curse, filterEps = 0.9, minWeightFallback = true, useAugmented = false, augmentedInventory = undefined, options, kdHybridRetryContext = undefined) {
+     let RestraintsList = [];
+     let effLevel = Level;
+     if (!options?.suppressTightPerk && KinkyDungeonStatsChoice.has("TightRestraints")) {
+@@ -60193,40 +60976,170 @@ function KDGetRestraintsEligible(enemy, Level, Index, Bypass, Lock, RequireWill,
+         geteligrest_lastExtraTags = extraTags;
+     }
+     let arousalMode = KinkyDungeonStatsChoice.get("arousalMode");
+-    let cache = [];
+-    for (let restraint of KinkyDungeonRestraints) {
+-        if (filter?.requireTags && !filter.requireTags.every((tag) => { return restraint.shrine?.includes(tag); }))
+-            continue;
+-        if ((effLevel >= restraint.minLevel
+-            || KinkyDungeonNewGame > 0
+-            || (restraint.ignoreMinLevelTags?.some((t) => { return tags.get(t); }))
+-            || filter?.require?.includes(restraint.name)) && (!restraint.maxLevel
+-            || effLevel < restraint.maxLevel
+-            || (restraint.ignoreMaxLevelTags?.some((t) => { return tags.get(t); }))) && (restraint.allFloors
+-            || restraint.floors[Index]
+-            || (restraint.ignoreFloorTags?.some((t) => { return tags.get(t); })))) {
+-            if (!restraint.arousalMode || arousalMode) {
+-                if (filter?.filterGroups?.some((fg) => {
+-                    return fg == restraint.Group;
+-                })) {
+-                }
+-                else {
+-                    let enabled = false;
+-                    let weight = restraint.weight;
+-                    for (let t of tags.keys()) {
+-                        if (restraint.enemyTags[t] != undefined) {
+-                            weight += restraint.enemyTags[t];
+-                            enabled = true;
+-                        }
+-                    }
+-                    if (restraint.enemyTagsMult)
+-                        for (let t of tags.keys()) {
+-                            if (restraint.enemyTagsMult[t] != undefined) {
+-                                weight *= restraint.enemyTagsMult[t];
++    const sourceControl = globalThis.KDHybridSourcePatchControl;
++    const sourceStats = sourceControl?.eligibleRestraintEnemyKeyStats;
++    const sourceCatalogFastPath =
++        KDHybridEligibleRestraintCatalogCompatible(sourceControl);
++    const sourceRetryFastPath = sourceCatalogFastPath
++        && !sourceControl?.disableEligibleRestraintRetryReuse
++        && !options?.extraOptions;
++    const sourcePrivateRetry =
++        kdHybridRetryContext?.token === KDHybridEligibleRestraintRetryToken;
++    const sourceRetryCache = sourceRetryFastPath
++        && sourcePrivateRetry
++        && kdHybridRetryContext.catalog === KinkyDungeonRestraints
++        && kdHybridRetryContext.tags === tags
++        && kdHybridRetryContext.enemy === enemy
++        && kdHybridRetryContext.effLevel === effLevel
++        && kdHybridRetryContext.Index === Index
++        && kdHybridRetryContext.filter === filter
++        && kdHybridRetryContext.extraTags === extraTags
++        && kdHybridRetryContext.arousalMode === arousalMode
++        && kdHybridRetryContext.newGame === KinkyDungeonNewGame
++        ? kdHybridRetryContext.cache
++        : undefined;
++    const sourceVerifyCatalog = sourceCatalogFastPath
++        && sourceStats?.verifyCatalog === true;
++    const sourceTopLevelKey = sourceCatalogFastPath
++        && !sourcePrivateRetry
++        ? KDHybridEligibleRestraintTopLevelKey(
++            tags,
++            effLevel,
++            Index,
++            filter,
++            arousalMode,
++            sourceControl,
++            sourceStats,
++            options,
++        )
++        : undefined;
++    const sourceSingleTopLevelCache = sourceTopLevelKey !== undefined
++        && KDHybridEligibleRestraintTopLevelCache?.catalog === KinkyDungeonRestraints
++        && KDHybridEligibleRestraintTopLevelCache.key === sourceTopLevelKey
++        ? KDHybridEligibleRestraintTopLevelCache.cache
++        : undefined;
++    const sourceMultiEntryReuse = sourceTopLevelKey !== undefined
++        && KDHybridEligibleRestraintMultiEntryCompatible(sourceControl);
++    let sourceMultiEntryTopLevelCache = undefined;
++    if (sourceMultiEntryReuse) {
++        for (let cacheIndex = 0; cacheIndex < KDHybridEligibleRestraintMultiEntryCache.length; cacheIndex += 1) {
++            const cacheEntry = KDHybridEligibleRestraintMultiEntryCache[cacheIndex];
++            if (cacheEntry.catalog === KinkyDungeonRestraints
++                && cacheEntry.key === sourceTopLevelKey) {
++                sourceMultiEntryTopLevelCache = cacheEntry.cache;
++                break;
++            }
++        }
++    }
++    const sourceTopLevelCache =
++        sourceMultiEntryTopLevelCache || sourceSingleTopLevelCache;
++    let cache = sourceRetryCache || sourceTopLevelCache || [];
++    if (sourceStats) {
++        sourceStats.catalogCalls = (sourceStats.catalogCalls || 0) + 1;
++        const key = sourceCatalogFastPath
++            ? "catalogOptimizedCalls"
++            : "catalogFallbackCalls";
++        sourceStats[key] = (sourceStats[key] || 0) + 1;
++        const reuseKey = sourceRetryCache
++            ? "retryReuseCalls"
++            : sourceTopLevelCache
++                ? "topLevelReuseCalls"
++                : "scanCalls";
++        sourceStats[reuseKey] = (sourceStats[reuseKey] || 0) + 1;
++        if (sourceTopLevelCache) {
++            const topLevelKey = sourceMultiEntryTopLevelCache
++                ? "multiEntryReuseCalls"
++                : "singleEntryReuseCalls";
++            sourceStats[topLevelKey] =
++                (sourceStats[topLevelKey] || 0) + 1;
++        }
++        else if (sourceMultiEntryReuse && !sourcePrivateRetry) {
++            sourceStats.multiEntryMissCalls =
++                (sourceStats.multiEntryMissCalls || 0) + 1;
++        }
++    }
++    if (!sourceRetryCache && !sourceTopLevelCache) {
++        for (let restraint of KinkyDungeonRestraints) {
++            if (filter?.requireTags && !filter.requireTags.every((tag) => { return restraint.shrine?.includes(tag); }))
++                continue;
++            if ((effLevel >= restraint.minLevel
++                || KinkyDungeonNewGame > 0
++                || (restraint.ignoreMinLevelTags?.some((t) => { return tags.get(t); }))
++                || filter?.require?.includes(restraint.name)) && (!restraint.maxLevel
++                || effLevel < restraint.maxLevel
++                || (restraint.ignoreMaxLevelTags?.some((t) => { return tags.get(t); }))) && (restraint.allFloors
++                || restraint.floors[Index]
++                || (restraint.ignoreFloorTags?.some((t) => { return tags.get(t); })))) {
++                if (!restraint.arousalMode || arousalMode) {
++                    if (filter?.filterGroups?.some((fg) => {
++                        return fg == restraint.Group;
++                    })) {
++                    }
++                    else {
++                        let enabled = false;
++                        let weight = restraint.weight;
++                        let sourceFastPath = sourceCatalogFastPath
++                            || KDHybridEligibleRestraintEnemyKeysCompatible(
++                                restraint,
++                                sourceControl,
++                            );
++                        if (sourceVerifyCatalog) {
++                            const expectedFastPath =
++                                KDHybridEligibleRestraintEnemyKeysCompatible(
++                                    restraint,
++                                    sourceControl,
++                                );
++                            sourceStats.catalogVerifications =
++                                (sourceStats.catalogVerifications || 0) + 1;
++                            if (!expectedFastPath) {
++                                sourceStats.catalogMismatches =
++                                    (sourceStats.catalogMismatches || 0) + 1;
++                                if (!sourceStats.firstCatalogMismatch)
++                                    sourceStats.firstCatalogMismatch =
++                                        restraint.name;
++                                sourceFastPath = false;
+                             }
+                         }
+-                    if (enabled) {
+-                        cache.push({ r: restraint, w: weight });
++                        if (sourceStats) {
++                            sourceStats.restraints = (sourceStats.restraints || 0) + 1;
++                            const key = sourceFastPath ? "optimizedRestraints" : "fallbackRestraints";
++                            sourceStats[key] = (sourceStats[key] || 0) + 1;
++                        }
++                        if (sourceFastPath) {
++                            for (let t in restraint.enemyTags) {
++                                if (tags.has(t)) {
++                                    weight += restraint.enemyTags[t];
++                                    enabled = true;
++                                }
++                            }
++                        }
++                        else {
++                            for (let t of tags.keys()) {
++                                if (restraint.enemyTags[t] != undefined) {
++                                    weight += restraint.enemyTags[t];
++                                    enabled = true;
++                                }
++                            }
++                        }
++                        if (restraint.enemyTagsMult) {
++                            if (sourceFastPath) {
++                                for (let t in restraint.enemyTagsMult) {
++                                    if (tags.has(t)) {
++                                        weight *= restraint.enemyTagsMult[t];
++                                    }
++                                }
++                            }
++                            else {
++                                for (let t of tags.keys()) {
++                                    if (restraint.enemyTagsMult[t] != undefined) {
++                                        weight *= restraint.enemyTagsMult[t];
++                                    }
++                                }
++                            }
++                        }
++                        if (enabled) {
++                            cache.push({ r: restraint, w: weight });
++                        }
+                     }
+                 }
+             }
+@@ -60238,10 +61151,38 @@ function KDGetRestraintsEligible(enemy, Level, Index, Bypass, Lock, RequireWill,
+                 cache.push({ r: KDRest(opt), w: options?.inventoryWeight || 100, name: opt, inventory: true });
+         }
+     }
++    if (!sourcePrivateRetry) {
++        if (sourceTopLevelKey !== undefined) {
++            KDHybridEligibleRestraintTopLevelCache = {
++                catalog: KinkyDungeonRestraints,
++                key: sourceTopLevelKey,
++                cache,
++            };
++            if (sourceMultiEntryReuse
++                && sourceMultiEntryTopLevelCache === undefined) {
++                if (KDHybridEligibleRestraintMultiEntryCache.length
++                    >= KDHybridEligibleRestraintMultiEntryCapacity)
++                    KDHybridEligibleRestraintMultiEntryCache.shift();
++                KDHybridEligibleRestraintMultiEntryCache.push({
++                    catalog: KinkyDungeonRestraints,
++                    key: sourceTopLevelKey,
++                    cache,
++                });
++            }
++            else if (!sourceMultiEntryReuse) {
++                KDHybridEligibleRestraintMultiEntryCache.length = 0;
++            }
++        }
++        else if (sourceTopLevelKey === undefined) {
++            KDHybridEligibleRestraintTopLevelCache = undefined;
++            KDHybridEligibleRestraintMultiEntryCache.length = 0;
++        }
++    }
+     let add = false;
+     let addedVar = false;
+     for (let r of cache) {
+         let restraint = r.r;
++        let candidateWeight = r.w;
+         if (filter && !r.inventory) {
+             if (filter.currentWill != undefined && r.r.maxwill != undefined && filter.currentWill > r.r.maxwill)
+                 continue;
+@@ -60279,26 +61220,26 @@ function KDGetRestraintsEligible(enemy, Level, Index, Bypass, Lock, RequireWill,
+                 if (restraint.playerTags)
+                     for (let tag in restraint.playerTags)
+                         if ((!agnostic || KDNoOverrideTags.includes(tag)) && KinkyDungeonPlayerTags.get(tag))
+-                            r.w += restraint.playerTags[tag];
++                            candidateWeight += restraint.playerTags[tag];
+                 if (restraint.playerTagsMult)
+                     for (let tag in restraint.playerTagsMult)
+                         if ((!agnostic || KDNoOverrideTags.includes(tag)) && KinkyDungeonPlayerTags.get(tag))
+-                            r.w *= restraint.playerTagsMult[tag];
++                            candidateWeight *= restraint.playerTagsMult[tag];
+                 if (restraint.playerTagsMissing)
+                     for (let tag in restraint.playerTagsMissing)
+                         if ((!agnostic || KDNoOverrideTags.includes(tag)) && !KinkyDungeonPlayerTags.get(tag))
+-                            r.w += restraint.playerTagsMissing[tag];
++                            candidateWeight += restraint.playerTagsMissing[tag];
+                 if (restraint.playerTagsMissingMult)
+                     for (let tag in restraint.playerTagsMissingMult)
+                         if ((!agnostic || KDNoOverrideTags.includes(tag)) && !KinkyDungeonPlayerTags.get(tag))
+-                            r.w *= restraint.playerTagsMissingMult[tag];
++                            candidateWeight *= restraint.playerTagsMissingMult[tag];
+                 if (!agnostic && !(options?.dontAugmentWeight === false)) {
+                     let mult = KDRestraintPowerMult(KinkyDungeonPlayerEntity, restraint, augmentedInventory);
+-                    if (Math.sign(mult) != Math.sign(r.w))
++                    if (Math.sign(mult) != Math.sign(candidateWeight))
+                         mult = 1;
+-                    r.w *= mult;
++                    candidateWeight *= mult;
+                 }
+-                if (r.w > 0 && (r.w > filterEps)) {
++                if (candidateWeight > 0 && (candidateWeight > filterEps)) {
+                     add = true;
+                 }
+             }
+@@ -60307,7 +61248,7 @@ function KDGetRestraintsEligible(enemy, Level, Index, Bypass, Lock, RequireWill,
+                     if (Level >= KDApplyVariants[variant[0]].minfloor && !(Level >= KDApplyVariants[variant[0]].maxfloor)
+                         && (!variant[1].enemyTags || Object.keys(variant[1].enemyTags).some((tag) => { return tags.get(tag) != undefined; }))
+                         && (agnostic || KDCanAddRestraint(restraint, Bypass, Lock, NoStack, undefined, KinkyDungeonStatsChoice.has("MagicHands") ? true : undefined, options?.noOverpower, securityEnemy, useAugmented, curse, augmentedInventory, KDApplyVariants[variant[0]].powerBonus))) {
+-                        let w = r.w * (variant[1].weightMult || 1) + (variant[1].weightMod || 0);
++                        let w = candidateWeight * (variant[1].weightMult || 1) + (variant[1].weightMod || 0);
+                         if (variant[1].enemyTags)
+                             for (let tag in variant[1].enemyTags)
+                                 if (tags.get(tag))
+@@ -60332,7 +61273,7 @@ function KDGetRestraintsEligible(enemy, Level, Index, Bypass, Lock, RequireWill,
+                             for (let tag in variant[1].playerTagsMissingMult)
+                                 if ((!agnostic || KDNoOverrideTags.includes(tag)) && !KinkyDungeonPlayerTags.get(tag))
+                                     w *= variant[1].playerTagsMissingMult[tag];
+-                        if (r.w > 0 && (r.w > filterEps)) {
++                        if (candidateWeight > 0 && (candidateWeight > filterEps)) {
+                             addedVar = true;
+                             RestraintsList.push({
+                                 restraint: restraint,
+@@ -60348,7 +61289,7 @@ function KDGetRestraintsEligible(enemy, Level, Index, Bypass, Lock, RequireWill,
+             if (add && (!addedVar || options?.dontPreferVariant)) {
+                 RestraintsList.push({
+                     restraint: restraint,
+-                    weight: r.w,
++                    weight: candidateWeight,
+                     inventoryVariant: (r.name && KinkyDungeonRestraintVariants[r.name]) ? r.name : undefined,
+                 });
+                 if (options?.QuitOnFirst)
+@@ -60376,7 +61317,22 @@ function KDGetRestraintsEligible(enemy, Level, Index, Bypass, Lock, RequireWill,
+         }
+     }
+     if (minWeightFallback && RestraintsList.length == 0) {
+-        return KDGetRestraintsEligible(enemy, Level, Index, Bypass, Lock, RequireWill, LeashingOnly, NoStack, extraTags, agnostic, filter, securityEnemy, curse, (filterEps || 0.05) > 0.1 ? filterEps * 0.1 : 0, filterEps > 0.1, useAugmented, augmentedInventory, options);
++        const sourceRetryContext = sourceRetryFastPath
++            ? {
++                token: KDHybridEligibleRestraintRetryToken,
++                catalog: KinkyDungeonRestraints,
++                tags,
++                enemy,
++                effLevel,
++                Index,
++                filter,
++                extraTags,
++                arousalMode,
++                newGame: KinkyDungeonNewGame,
++                cache,
++            }
++            : undefined;
++        return KDGetRestraintsEligible(enemy, Level, Index, Bypass, Lock, RequireWill, LeashingOnly, NoStack, extraTags, agnostic, filter, securityEnemy, curse, (filterEps || 0.05) > 0.1 ? filterEps * 0.1 : 0, filterEps > 0.1, useAugmented, augmentedInventory, options, sourceRetryContext);
+     }
+     if (!options?.allowLowPower) {
+         return RestraintsList2;
+@@ -105644,6 +106600,319 @@ function KDIsSmartMovable(x, y) {
+ let KDPathfindingCacheHits = 0;
+ let KDPathfindingCacheFails = 0;
+ let KDPFTrim = 40;
++const KDHybridPathfindingTopCacheDependencies = {
++    map: Map,
++    prototype: Map.prototype,
++    get: Map.prototype.get,
++    has: Map.prototype.has,
++    delete: Map.prototype.delete,
++};
++function KDHybridPathfindingTopCacheCompatible(pathCache, sourceControl) {
++    return !sourceControl?.disablePathfindingTopCacheSingleRead
++        && Map === KDHybridPathfindingTopCacheDependencies.map
++        && Map.prototype === KDHybridPathfindingTopCacheDependencies.prototype
++        && Map.prototype.get === KDHybridPathfindingTopCacheDependencies.get
++        && Map.prototype.has === KDHybridPathfindingTopCacheDependencies.has
++        && Map.prototype.delete === KDHybridPathfindingTopCacheDependencies.delete
++        && pathCache?.get === KDHybridPathfindingTopCacheDependencies.get
++        && pathCache?.has === KDHybridPathfindingTopCacheDependencies.has
++        && pathCache?.delete === KDHybridPathfindingTopCacheDependencies.delete;
++}
++const KDHybridPathfindingContinuationCacheDependencies = {
++    map: Map,
++    prototype: Map.prototype,
++    get: Map.prototype.get,
++    has: Map.prototype.has,
++    delete: Map.prototype.delete,
++    mapGet: KinkyDungeonMapGet,
++    tilesGet: KinkyDungeonTilesGet,
++};
++function KDHybridPathfindingContinuationCacheCompatible(pathCache, sourceControl) {
++    return !sourceControl?.disablePathfindingContinuationCacheLookup
++        && Map === KDHybridPathfindingContinuationCacheDependencies.map
++        && Map.prototype === KDHybridPathfindingContinuationCacheDependencies.prototype
++        && Map.prototype.get === KDHybridPathfindingContinuationCacheDependencies.get
++        && Map.prototype.has === KDHybridPathfindingContinuationCacheDependencies.has
++        && Map.prototype.delete === KDHybridPathfindingContinuationCacheDependencies.delete
++        && pathCache?.get === KDHybridPathfindingContinuationCacheDependencies.get
++        && pathCache?.has === KDHybridPathfindingContinuationCacheDependencies.has
++        && pathCache?.delete === KDHybridPathfindingContinuationCacheDependencies.delete
++        && KinkyDungeonMapGet === KDHybridPathfindingContinuationCacheDependencies.mapGet
++        && KinkyDungeonTilesGet === KDHybridPathfindingContinuationCacheDependencies.tilesGet;
++}
++const KDHybridPathfindingDeferredTileDependencies = {
++    tilesGet: KinkyDungeonTilesGet,
++    includes: String.prototype.includes,
++};
++function KDHybridPathfindingDeferredTileCompatible(Tiles, RequireLight, sourceControl) {
++    return !sourceControl?.disablePathfindingDeferredTileMetadata
++        && (RequireLight === undefined || RequireLight === false)
++        && typeof Tiles === "string"
++        && KinkyDungeonTilesGet === KDHybridPathfindingDeferredTileDependencies.tilesGet
++        && String.prototype.includes === KDHybridPathfindingDeferredTileDependencies.includes;
++}
++const KDHybridPathfindingSuccessorDependencies = {
++    map: Map,
++    get: Map.prototype.get,
++    set: Map.prototype.set,
++    forEach: Map.prototype.forEach,
++};
++function KDHybridPathfindingDirectSuccessorsCompatible(sourceControl) {
++    return !sourceControl?.disablePathfindingDirectSuccessors
++        && Map === KDHybridPathfindingSuccessorDependencies.map
++        && Map.prototype.get === KDHybridPathfindingSuccessorDependencies.get
++        && Map.prototype.set === KDHybridPathfindingSuccessorDependencies.set
++        && Map.prototype.forEach === KDHybridPathfindingSuccessorDependencies.forEach;
++}
++globalThis.KDHybridSourcePatches =
++    globalThis.KDHybridSourcePatches || {};
++globalThis.KDHybridSourcePatches.pathfindingDirectSuccessors =
++    "5.4.92-source-v1";
++globalThis.KDHybridSourcePatches.pathfindingClosedFirstSuccessors =
++    "5.4.92-source-v1";
++globalThis.KDHybridSourcePatches.pathfindingTopCacheSingleRead =
++    "5.4.92-source-v1";
++globalThis.KDHybridSourcePatches.pathfindingContinuationCacheLookup =
++    "5.4.92-source-v1";
++globalThis.KDHybridSourcePatches.pathfindingDeferredTileMetadata =
++    "5.4.92-source-v1";
++const KDHybridPathfindingOpenValuesIteratorPrototype = Object.getPrototypeOf(new Map().values());
++const KDHybridPathfindingOpenValuesDependencies = {
++    map: Map,
++    forEach: Map.prototype.forEach,
++    values: Map.prototype.values,
++    iteratorNext: KDHybridPathfindingOpenValuesIteratorPrototype.next,
++    iterator: KDHybridPathfindingOpenValuesIteratorPrototype[Symbol.iterator],
++};
++function KDHybridPathfindingOpenValuesCompatible(sourceControl) {
++    return !sourceControl?.disablePathfindingOpenValues
++        && Map === KDHybridPathfindingOpenValuesDependencies.map
++        && Map.prototype.forEach === KDHybridPathfindingOpenValuesDependencies.forEach
++        && Map.prototype.values === KDHybridPathfindingOpenValuesDependencies.values
++        && KDHybridPathfindingOpenValuesIteratorPrototype.next === KDHybridPathfindingOpenValuesDependencies.iteratorNext
++        && KDHybridPathfindingOpenValuesIteratorPrototype[Symbol.iterator] === KDHybridPathfindingOpenValuesDependencies.iterator;
++}
++globalThis.KDHybridSourcePatches.pathfindingOpenValues =
++    "5.4.92-source-v1";
++function KDHybridPathfindingHoistedCacheIndexCompatible(endx, endy, tileShort, sourceControl) {
++    return !sourceControl?.disablePathfindingHoistedCacheIndex
++        && typeof endx === "number"
++        && typeof endy === "number"
++        && typeof tileShort === "string";
++}
++globalThis.KDHybridSourcePatches.pathfindingHoistedCacheIndex =
++    "5.4.92-source-v1";
++const KDHybridPathfindingNumericCoordinateKeyDependencies = {
++    map: Map,
++    prototype: Map.prototype,
++    get: Map.prototype.get,
++    set: Map.prototype.set,
++    delete: Map.prototype.delete,
++    clear: Map.prototype.clear,
++    values: Map.prototype.values,
++    getPath: KinkyDungeonGetPath,
++    numberIsInteger: Number.isInteger,
++    arrayPush: Array.prototype.push,
++    arrayReverse: Array.prototype.reverse,
++};
++const KDHybridPathfindingTileMembershipDependencies = {
++    groundTiles: KinkyDungeonGroundTiles,
++    enemyTiles: KinkyDungeonMovableTilesEnemy,
++    smartEnemyTiles: KinkyDungeonMovableTilesSmartEnemy,
++    includes: String.prototype.includes,
++    charCodeAt: String.prototype.charCodeAt,
++    uint8Array: Uint8Array,
++};
++function KDHybridCreatePathfindingTileMembershipTable(tiles) {
++    const table = new Uint8Array(128);
++    for (let i = 0; i < tiles.length; i++)
++        table[tiles.charCodeAt(i)] = 1;
++    return table;
++}
++const KDHybridPathfindingTileMembershipTables = {
++    ground: KDHybridCreatePathfindingTileMembershipTable(KDHybridPathfindingTileMembershipDependencies.groundTiles),
++    enemy: KDHybridCreatePathfindingTileMembershipTable(KDHybridPathfindingTileMembershipDependencies.enemyTiles),
++    smartEnemy: KDHybridCreatePathfindingTileMembershipTable(KDHybridPathfindingTileMembershipDependencies.smartEnemyTiles),
++};
++function KDHybridPathfindingNumericCoordinateKeysCompatible(startx, starty, endx, endy, sourceControl) {
++    const gridWidth = KDMapData?.GridWidth;
++    const gridHeight = KDMapData?.GridHeight;
++    return sourceControl?.enablePathCacheEdgeIdentitySkip === true
++        && !sourceControl?.disablePathfindingNumericCoordinateKeys
++        && !KDModsLoaded
++        && KDAllModFiles.length === 0
++        && Map === KDHybridPathfindingNumericCoordinateKeyDependencies.map
++        && Map.prototype === KDHybridPathfindingNumericCoordinateKeyDependencies.prototype
++        && Map.prototype.get === KDHybridPathfindingNumericCoordinateKeyDependencies.get
++        && Map.prototype.set === KDHybridPathfindingNumericCoordinateKeyDependencies.set
++        && Map.prototype.delete === KDHybridPathfindingNumericCoordinateKeyDependencies.delete
++        && Map.prototype.clear === KDHybridPathfindingNumericCoordinateKeyDependencies.clear
++        && Map.prototype.values === KDHybridPathfindingNumericCoordinateKeyDependencies.values
++        && KinkyDungeonGetPath === KDHybridPathfindingNumericCoordinateKeyDependencies.getPath
++        && Number.isInteger === KDHybridPathfindingNumericCoordinateKeyDependencies.numberIsInteger
++        && Array.prototype.push === KDHybridPathfindingNumericCoordinateKeyDependencies.arrayPush
++        && Array.prototype.reverse === KDHybridPathfindingNumericCoordinateKeyDependencies.arrayReverse
++        && Number.isInteger(gridWidth)
++        && Number.isInteger(gridHeight)
++        && gridWidth > 0
++        && gridHeight > 0
++        && Number.isInteger(startx)
++        && Number.isInteger(starty)
++        && Number.isInteger(endx)
++        && Number.isInteger(endy)
++        && startx >= 0
++        && startx < gridWidth
++        && starty >= 0
++        && starty < gridHeight
++        && endx >= 0
++        && endx < gridWidth
++        && endy >= 0
++        && endy < gridHeight;
++}
++function KDHybridPathfindingTileMembershipTable(TilesTemp, noDoors, sourceNumericCoordinateKeys, sourceContinuationCacheLookup, sourceDeferredTileMetadata, sourceControl) {
++    if (!sourceNumericCoordinateKeys
++        || !sourceContinuationCacheLookup
++        || !sourceDeferredTileMetadata
++        || noDoors
++        || sourceControl?.disablePathfindingTileMembershipTable
++        || KinkyDungeonGroundTiles !== KDHybridPathfindingTileMembershipDependencies.groundTiles
++        || KinkyDungeonMovableTilesEnemy !== KDHybridPathfindingTileMembershipDependencies.enemyTiles
++        || KinkyDungeonMovableTilesSmartEnemy !== KDHybridPathfindingTileMembershipDependencies.smartEnemyTiles
++        || String.prototype.includes !== KDHybridPathfindingTileMembershipDependencies.includes
++        || String.prototype.charCodeAt !== KDHybridPathfindingTileMembershipDependencies.charCodeAt
++        || Uint8Array !== KDHybridPathfindingTileMembershipDependencies.uint8Array)
++        return undefined;
++    if (TilesTemp === KDHybridPathfindingTileMembershipDependencies.smartEnemyTiles)
++        return KDHybridPathfindingTileMembershipTables.smartEnemy;
++    if (TilesTemp === KDHybridPathfindingTileMembershipDependencies.enemyTiles)
++        return KDHybridPathfindingTileMembershipTables.enemy;
++    if (TilesTemp === KDHybridPathfindingTileMembershipDependencies.groundTiles)
++        return KDHybridPathfindingTileMembershipTables.ground;
++    return undefined;
++}
++const KDHybridPathfindingNumericContinuationIndexDependencies = {
++    map: Map,
++    mapPrototype: Map.prototype,
++    mapGet: Map.prototype.get,
++    mapSet: Map.prototype.set,
++    mapHas: Map.prototype.has,
++    mapDelete: Map.prototype.delete,
++    weakMap: WeakMap,
++    weakMapPrototype: WeakMap.prototype,
++    weakMapGet: WeakMap.prototype.get,
++    weakMapSet: WeakMap.prototype.set,
++    weakMapDelete: WeakMap.prototype.delete,
++    numberIsInteger: Number.isInteger,
++    setPathfindCache: KDSetPathfindCache,
++};
++const KDHybridPathfindingNumericContinuationIndexes = new WeakMap();
++function KDHybridPathfindingNumericContinuationIndexCompatible(PathMap, sourceControl) {
++    return sourceControl?.enablePathCacheEdgeIdentitySkip === true
++        && !sourceControl?.disablePathfindingNumericContinuationIndex
++        && !KDModsLoaded
++        && KDAllModFiles.length === 0
++        && Map === KDHybridPathfindingNumericContinuationIndexDependencies.map
++        && Map.prototype === KDHybridPathfindingNumericContinuationIndexDependencies.mapPrototype
++        && Map.prototype.get === KDHybridPathfindingNumericContinuationIndexDependencies.mapGet
++        && Map.prototype.set === KDHybridPathfindingNumericContinuationIndexDependencies.mapSet
++        && Map.prototype.has === KDHybridPathfindingNumericContinuationIndexDependencies.mapHas
++        && Map.prototype.delete === KDHybridPathfindingNumericContinuationIndexDependencies.mapDelete
++        && WeakMap === KDHybridPathfindingNumericContinuationIndexDependencies.weakMap
++        && WeakMap.prototype === KDHybridPathfindingNumericContinuationIndexDependencies.weakMapPrototype
++        && WeakMap.prototype.get === KDHybridPathfindingNumericContinuationIndexDependencies.weakMapGet
++        && WeakMap.prototype.set === KDHybridPathfindingNumericContinuationIndexDependencies.weakMapSet
++        && WeakMap.prototype.delete === KDHybridPathfindingNumericContinuationIndexDependencies.weakMapDelete
++        && Number.isInteger === KDHybridPathfindingNumericContinuationIndexDependencies.numberIsInteger
++        && KDSetPathfindCache === KDHybridPathfindingNumericContinuationIndexDependencies.setPathfindCache
++        && (PathMap === KDPathCache || PathMap === KDPathCacheIgnoreLocks)
++        && PathMap.constructor === Map
++        && PathMap.get === KDHybridPathfindingNumericContinuationIndexDependencies.mapGet
++        && PathMap.set === KDHybridPathfindingNumericContinuationIndexDependencies.mapSet
++        && PathMap.has === KDHybridPathfindingNumericContinuationIndexDependencies.mapHas
++        && PathMap.delete === KDHybridPathfindingNumericContinuationIndexDependencies.mapDelete;
++}
++function KDHybridGetPathfindingNumericContinuationRecord(PathMap, sourceControl, createIfEmpty) {
++    if (!KDHybridPathfindingNumericContinuationIndexCompatible(PathMap, sourceControl)) {
++        if (PathMap === KDPathCache || PathMap === KDPathCacheIgnoreLocks)
++            KDHybridPathfindingNumericContinuationIndexes.delete(PathMap);
++        return undefined;
++    }
++    const width = KDMapData?.GridWidth;
++    const height = KDMapData?.GridHeight;
++    if (!Number.isInteger(width)
++        || !Number.isInteger(height)
++        || width <= 0
++        || height <= 0) {
++        KDHybridPathfindingNumericContinuationIndexes.delete(PathMap);
++        return undefined;
++    }
++    let record = KDHybridPathfindingNumericContinuationIndexes.get(PathMap);
++    if (record
++        && (record.width !== width || record.height !== height)) {
++        KDHybridPathfindingNumericContinuationIndexes.delete(PathMap);
++        record = undefined;
++    }
++    if (!record && createIfEmpty && PathMap.size === 0) {
++        record = {
++            width,
++            height,
++            suffixes: new Map(),
++        };
++        KDHybridPathfindingNumericContinuationIndexes.set(PathMap, record);
++    }
++    return record;
++}
++function KDHybridGetPathfindingNumericContinuationSuffix(record, endx, endy, Tiles, create) {
++    const suffixKey = `${endx},${endy},${Tiles}`;
++    let suffix = record.suffixes.get(suffixKey);
++    if (!suffix && create) {
++        suffix = new Map();
++        record.suffixes.set(suffixKey, suffix);
++    }
++    return suffix;
++}
++function KDHybridPathfindingNumericContinuationCoordinateKey(record, x, y) {
++    return Number.isInteger(x)
++        && Number.isInteger(y)
++        && x >= 0
++        && x < record.width
++        && y >= 0
++        && y < record.height
++        ? x + y * record.width
++        : undefined;
++}
++function KDHybridDeletePathfindingNumericContinuationEntry(PathMap, x, y, endx, endy, Tiles, sourceControl) {
++    const record = KDHybridGetPathfindingNumericContinuationRecord(PathMap, sourceControl, false);
++    if (!record)
++        return;
++    const coordinateKey = KDHybridPathfindingNumericContinuationCoordinateKey(record, x, y);
++    if (coordinateKey === undefined) {
++        KDHybridPathfindingNumericContinuationIndexes.delete(PathMap);
++        return;
++    }
++    KDHybridGetPathfindingNumericContinuationSuffix(record, endx, endy, Tiles, false)?.delete(coordinateKey);
++}
++function KDHybridGetNumericCoordinatePath(closed, key, endx, endy) {
++    const list = [];
++    if (endx && endy)
++        list.push({ x: endx, y: endy });
++    let current = closed.get(key);
++    while (current) {
++        if (current.s !== undefined) {
++            list.push({ x: current.x, y: current.y });
++            current = closed.get(current.s);
++        }
++        else
++            current = undefined;
++    }
++    return list.reverse();
++}
++globalThis.KDHybridSourcePatches.pathfindingNumericCoordinateKeys =
++    "5.4.92-source-v1";
++globalThis.KDHybridSourcePatches.pathfindingTileMembershipTable =
++    "5.4.92-source-v1";
++globalThis.KDHybridSourcePatches.pathfindingNumericContinuationIndex =
++    "5.4.92-source-v1";
+ function KinkyDungeonFindPath(startx, starty, endx, endy, blockEnemy, blockPlayer, ignoreLocks, Tiles, RequireLight, noDoors, needDoorMemory, Enemy, trimLongDistance, heuristicOverride, taxicab, ignoreTrafficLaws, allowPassable, ignoreAllWeighting, Leashtarget) {
+     let tileShort = Tiles;
+     if (Tiles == KinkyDungeonMovableTilesSmartEnemy)
+@@ -105653,29 +106922,125 @@ function KinkyDungeonFindPath(startx, starty, endx, endy, blockEnemy, blockPlaye
+     else if (Tiles == KinkyDungeonGroundTiles)
+         tileShort = "TG";
+     let index = `${startx},${starty},${endx},${endy},${tileShort}`;
++    const sourceControl = globalThis.KDHybridSourcePatchControl;
+     if (!blockEnemy && !blockPlayer && !RequireLight && !noDoors && !needDoorMemory) {
+-        if (ignoreLocks) {
+-            if (KDPathCacheIgnoreLocks.has(index)) {
++        const topPathCache = ignoreLocks ? KDPathCacheIgnoreLocks : KDPathCache;
++        const sourceTopCacheSingleRead = KDHybridPathfindingTopCacheCompatible(topPathCache, sourceControl);
++        const sourceTopCacheSingleReadStats = sourceControl?.pathfindingTopCacheSingleReadStats;
++        if (sourceTopCacheSingleReadStats) {
++            sourceTopCacheSingleReadStats.calls =
++                (sourceTopCacheSingleReadStats.calls || 0) + 1;
++            const key = sourceTopCacheSingleRead ? "optimizedCalls" : "fallbackCalls";
++            sourceTopCacheSingleReadStats[key] =
++                (sourceTopCacheSingleReadStats[key] || 0) + 1;
++        }
++        if (sourceTopCacheSingleRead) {
++            const cachedPath = topPathCache.get(index);
++            if (cachedPath !== undefined || topPathCache.has(index)) {
+                 KDPathfindingCacheHits++;
+-                if (KDPathCacheIgnoreLocks.get(index)[0] && KDistChebyshev(KDPathCacheIgnoreLocks.get(index)[0].x - startx, KDPathCacheIgnoreLocks.get(index)[0].y - starty) < 1.5)
+-                    return KDPathCacheIgnoreLocks.get(index).slice(0);
+-                else
+-                    KDPathCacheIgnoreLocks.delete(index);
++                if (cachedPath[0] && KDistChebyshev(cachedPath[0].x - startx, cachedPath[0].y - starty) < 1.5)
++                    return cachedPath.slice(0);
++                else {
++                    topPathCache.delete(index);
++                    KDHybridDeletePathfindingNumericContinuationEntry(topPathCache, startx, starty, endx, endy, tileShort, sourceControl);
++                }
+             }
+         }
+         else {
+-            if (KDPathCache.has(index)) {
+-                KDPathfindingCacheHits++;
+-                if (KDPathCache.get(index)[0] && KDistChebyshev(KDPathCache.get(index)[0].x - startx, KDPathCache.get(index)[0].y - starty) < 1.5)
+-                    return KDPathCache.get(index).slice(0);
+-                else
+-                    KDPathCache.delete(index);
++            if (ignoreLocks) {
++                if (KDPathCacheIgnoreLocks.has(index)) {
++                    KDPathfindingCacheHits++;
++                    if (KDPathCacheIgnoreLocks.get(index)[0] && KDistChebyshev(KDPathCacheIgnoreLocks.get(index)[0].x - startx, KDPathCacheIgnoreLocks.get(index)[0].y - starty) < 1.5)
++                        return KDPathCacheIgnoreLocks.get(index).slice(0);
++                    else {
++                        KDPathCacheIgnoreLocks.delete(index);
++                        KDHybridDeletePathfindingNumericContinuationEntry(KDPathCacheIgnoreLocks, startx, starty, endx, endy, tileShort, sourceControl);
++                    }
++                }
++            }
++            else {
++                if (KDPathCache.has(index)) {
++                    KDPathfindingCacheHits++;
++                    if (KDPathCache.get(index)[0] && KDistChebyshev(KDPathCache.get(index)[0].x - startx, KDPathCache.get(index)[0].y - starty) < 1.5)
++                        return KDPathCache.get(index).slice(0);
++                    else {
++                        KDPathCache.delete(index);
++                        KDHybridDeletePathfindingNumericContinuationEntry(KDPathCache, startx, starty, endx, endy, tileShort, sourceControl);
++                    }
++                }
+             }
+         }
+     }
+     if (KDistChebyshev(startx - endx, starty - endy) < 1.5) {
+         return [{ x: endx, y: endy }];
+     }
++    const sourceDirectSuccessors = KDHybridPathfindingDirectSuccessorsCompatible(sourceControl);
++    const sourceDirectSuccessorStats = sourceControl?.pathfindingDirectSuccessorStats;
++    if (sourceDirectSuccessorStats) {
++        sourceDirectSuccessorStats.calls = (sourceDirectSuccessorStats.calls || 0) + 1;
++        const key = sourceDirectSuccessors ? "optimizedCalls" : "fallbackCalls";
++        sourceDirectSuccessorStats[key] = (sourceDirectSuccessorStats[key] || 0) + 1;
++    }
++    const sourceClosedFirstSuccessors = sourceDirectSuccessors
++        && !sourceControl?.disablePathfindingClosedFirstSuccessors;
++    const sourceClosedFirstSuccessorStats = sourceControl?.pathfindingClosedFirstSuccessorStats;
++    if (sourceClosedFirstSuccessorStats) {
++        sourceClosedFirstSuccessorStats.calls =
++            (sourceClosedFirstSuccessorStats.calls || 0) + 1;
++        const key = sourceClosedFirstSuccessors ? "optimizedCalls" : "fallbackCalls";
++        sourceClosedFirstSuccessorStats[key] =
++            (sourceClosedFirstSuccessorStats[key] || 0) + 1;
++    }
++    const sourceOpenValues = KDHybridPathfindingOpenValuesCompatible(sourceControl);
++    const sourceOpenValuesStats = sourceControl?.pathfindingOpenValuesStats;
++    if (sourceOpenValuesStats) {
++        sourceOpenValuesStats.calls = (sourceOpenValuesStats.calls || 0) + 1;
++        const key = sourceOpenValues ? "optimizedCalls" : "fallbackCalls";
++        sourceOpenValuesStats[key] = (sourceOpenValuesStats[key] || 0) + 1;
++    }
++    const sourceHoistedCacheIndex = KDHybridPathfindingHoistedCacheIndexCompatible(endx, endy, tileShort, sourceControl);
++    const sourceHoistedCacheIndexStats = sourceControl?.pathfindingHoistedCacheIndexStats;
++    if (sourceHoistedCacheIndexStats) {
++        sourceHoistedCacheIndexStats.calls = (sourceHoistedCacheIndexStats.calls || 0) + 1;
++        const key = sourceHoistedCacheIndex ? "optimizedCalls" : "fallbackCalls";
++        sourceHoistedCacheIndexStats[key] =
++            (sourceHoistedCacheIndexStats[key] || 0) + 1;
++    }
++    const continuationPathCache = ignoreLocks ? KDPathCacheIgnoreLocks : KDPathCache;
++    const sourceContinuationCacheLookup = sourceHoistedCacheIndex
++        && !blockEnemy
++        && !blockPlayer
++        && !RequireLight
++        && !noDoors
++        && !needDoorMemory
++        && KDHybridPathfindingContinuationCacheCompatible(continuationPathCache, sourceControl);
++    const sourceContinuationCacheLookupStats = sourceControl?.pathfindingContinuationCacheLookupStats;
++    if (sourceContinuationCacheLookupStats) {
++        sourceContinuationCacheLookupStats.calls =
++            (sourceContinuationCacheLookupStats.calls || 0) + 1;
++        const key = sourceContinuationCacheLookup ? "optimizedCalls" : "fallbackCalls";
++        sourceContinuationCacheLookupStats[key] =
++            (sourceContinuationCacheLookupStats[key] || 0) + 1;
++    }
++    const sourceNumericCoordinateKeys = sourceClosedFirstSuccessors
++        && sourceOpenValues
++        && sourceHoistedCacheIndex
++        && KDHybridPathfindingNumericCoordinateKeysCompatible(startx, starty, endx, endy, sourceControl);
++    const sourceNumericCoordinateKeyStats = sourceControl?.pathfindingNumericCoordinateKeyStats;
++    if (sourceNumericCoordinateKeyStats) {
++        sourceNumericCoordinateKeyStats.calls =
++            (sourceNumericCoordinateKeyStats.calls || 0) + 1;
++        const key = sourceNumericCoordinateKeys ? "optimizedCalls" : "fallbackCalls";
++        sourceNumericCoordinateKeyStats[key] =
++            (sourceNumericCoordinateKeyStats[key] || 0) + 1;
++    }
++    const numericCoordinateKeyStride = sourceNumericCoordinateKeys
++        ? KDMapData.GridWidth
++        : 0;
++    const numericCoordinateKeyVerifier = sourceNumericCoordinateKeys
++        && sourceNumericCoordinateKeyStats?.verify === true
++        ? new Map()
++        : undefined;
+     function heuristic(xx, yy, endxx, endyy) {
+         return 0.1 * KDistEuclideanApprox((xx - endxx) * (xx - endxx), (yy - endyy) * (yy - endyy));
+     }
+@@ -105683,14 +107048,57 @@ function KinkyDungeonFindPath(startx, starty, endx, endy, blockEnemy, blockPlaye
+     let TilesTemp = Tiles;
+     if (noDoors)
+         TilesTemp = Tiles.replace("D", "");
+-    let start = { x: startx, y: starty, g: 0, f: 0, s: "" };
++    const sourceDeferredTileMetadata = KDHybridPathfindingDeferredTileCompatible(TilesTemp, RequireLight, sourceControl);
++    const sourceDeferredTileMetadataStats = sourceControl?.pathfindingDeferredTileMetadataStats;
++    if (sourceDeferredTileMetadataStats) {
++        sourceDeferredTileMetadataStats.calls =
++            (sourceDeferredTileMetadataStats.calls || 0) + 1;
++        const key = sourceDeferredTileMetadata ? "optimizedCalls" : "fallbackCalls";
++        sourceDeferredTileMetadataStats[key] =
++            (sourceDeferredTileMetadataStats[key] || 0) + 1;
++    }
++    const sourceTileMembershipTable = KDHybridPathfindingTileMembershipTable(TilesTemp, noDoors, sourceNumericCoordinateKeys, sourceContinuationCacheLookup, sourceDeferredTileMetadata, sourceControl);
++    const sourceTileMembershipTableStats = sourceControl?.pathfindingTileMembershipTableStats;
++    if (sourceTileMembershipTableStats) {
++        sourceTileMembershipTableStats.calls =
++            (sourceTileMembershipTableStats.calls || 0) + 1;
++        const key = sourceTileMembershipTable ? "optimizedCalls" : "fallbackCalls";
++        sourceTileMembershipTableStats[key] =
++            (sourceTileMembershipTableStats[key] || 0) + 1;
++    }
++    let sourceNumericContinuationIndex = sourceTileMembershipTable
++        ? KDHybridGetPathfindingNumericContinuationRecord(continuationPathCache, sourceControl, true)
++        : undefined;
++    let sourceNumericContinuationSuffix = sourceNumericContinuationIndex
++        ? KDHybridGetPathfindingNumericContinuationSuffix(sourceNumericContinuationIndex, endx, endy, tileShort, false)
++        : undefined;
++    const sourceNumericContinuationIndexStats = sourceControl?.pathfindingNumericContinuationIndexStats;
++    if (sourceNumericContinuationIndexStats) {
++        sourceNumericContinuationIndexStats.calls =
++            (sourceNumericContinuationIndexStats.calls || 0) + 1;
++        const key = sourceNumericContinuationIndex ? "optimizedCalls" : "fallbackCalls";
++        sourceNumericContinuationIndexStats[key] =
++            (sourceNumericContinuationIndexStats[key] || 0) + 1;
++    }
++    const startKey = sourceNumericCoordinateKeys
++        ? startx + starty * numericCoordinateKeyStride
++        : startx + "," + starty;
++    let start = {
++        x: startx,
++        y: starty,
++        g: 0,
++        f: 0,
++        s: sourceNumericCoordinateKeys ? undefined : "",
++    };
+     let open = new Map();
+-    open.set(startx + "," + starty, start);
++    open.set(startKey, start);
++    if (numericCoordinateKeyVerifier)
++        numericCoordinateKeyVerifier.set(startKey, startx + "," + starty);
+     let closed = new Map();
+     let costBonus = 0;
+     let MapTile = null;
+     let moveCost = 1;
+-    let succ = new Map();
++    let succ = sourceDirectSuccessors ? undefined : new Map();
+     let xx = 0;
+     let yy = 0;
+     let loc = "";
+@@ -105704,17 +107112,87 @@ function KinkyDungeonFindPath(startx, starty, endx, endy, blockEnemy, blockPlaye
+         let lc = 1000000000;
+         let dx = 0;
+         let dy = 0;
+-        open.forEach(o => {
+-            if (o.f < lc) {
+-                lc = o.f;
+-                lowest_old = lowest;
+-                lowest = o;
++        if (sourceOpenValues) {
++            for (const o of open.values()) {
++                if (o.f < lc) {
++                    lc = o.f;
++                    lowest_old = lowest;
++                    lowest = o;
++                }
+             }
+-        });
++        }
++        else {
++            open.forEach(o => {
++                if (o.f < lc) {
++                    lc = o.f;
++                    lowest_old = lowest;
++                    lowest = o;
++                }
++            });
++        }
+         if (lowest) {
+-            let lowLoc = lowest.x + "," + lowest.y;
++            let lowLoc = sourceNumericContinuationIndex
++                ? ""
++                : lowest.x + "," + lowest.y;
++            const lowKey = sourceNumericCoordinateKeys
++                ? lowest.x + lowest.y * numericCoordinateKeyStride
++                : lowLoc;
++            let locIndex = sourceNumericContinuationIndex
++                ? ""
++                : sourceHoistedCacheIndex
++                ? `${lowLoc},${endx},${endy},${tileShort}`
++                : "";
++            let continuationCacheHit = false;
++            let continuationCachePath = undefined;
++            if (sourceNumericContinuationIndex) {
++                continuationCachePath = sourceNumericContinuationSuffix?.get(lowKey);
++                continuationCacheHit = continuationCachePath !== undefined;
++                if (sourceNumericContinuationIndexStats) {
++                    sourceNumericContinuationIndexStats.lookups =
++                        (sourceNumericContinuationIndexStats.lookups || 0) + 1;
++                    const key = continuationCacheHit ? "hits" : "misses";
++                    sourceNumericContinuationIndexStats[key] =
++                        (sourceNumericContinuationIndexStats[key] || 0) + 1;
++                    if (sourceNumericContinuationIndexStats.verify === true) {
++                        lowLoc = lowest.x + "," + lowest.y;
++                        locIndex = `${lowLoc},${endx},${endy},${tileShort}`;
++                        const expectedHit = continuationPathCache.has(locIndex);
++                        const expectedPath = expectedHit
++                            ? continuationPathCache.get(locIndex)
++                            : undefined;
++                        sourceNumericContinuationIndexStats.verifierChecks =
++                            (sourceNumericContinuationIndexStats.verifierChecks || 0) + 1;
++                        if (continuationCacheHit !== expectedHit
++                            || (expectedHit && continuationCachePath !== expectedPath)) {
++                            sourceNumericContinuationIndexStats.mismatches =
++                                (sourceNumericContinuationIndexStats.mismatches || 0) + 1;
++                            if (!sourceNumericContinuationIndexStats.firstMismatch)
++                                sourceNumericContinuationIndexStats.firstMismatch = {
++                                    location: lowLoc,
++                                    endx,
++                                    endy,
++                                    tileShort,
++                                    shadowHit: continuationCacheHit,
++                                    expectedHit,
++                                    identityMatch: continuationCachePath === expectedPath,
++                                };
++                            KDHybridPathfindingNumericContinuationIndexes.delete(continuationPathCache);
++                            sourceNumericContinuationIndex = undefined;
++                            sourceNumericContinuationSuffix = undefined;
++                            continuationCacheHit = expectedHit;
++                            continuationCachePath = expectedPath;
++                        }
++                    }
++                }
++            }
++            else if (sourceContinuationCacheLookup) {
++                continuationCacheHit = continuationPathCache.has(locIndex);
++                if (continuationCacheHit)
++                    continuationCachePath = continuationPathCache.get(locIndex);
++            }
+             moveCost = 1;
+-            succ = new Map();
++            if (!sourceDirectSuccessors)
++                succ = new Map();
+             for (let x = -1; x <= 1; x++) {
+                 for (let y = -1; y <= 1; y++) {
+                     if ((x != 0 || y != 0) && (!taxicab || y == 0 || x == 0)) {
+@@ -105722,19 +107200,54 @@ function KinkyDungeonFindPath(startx, starty, endx, endy, blockEnemy, blockPlaye
+                         yy = lowest.y + y;
+                         loc = (xx) + "," + (yy);
+                         let tile = (xx == endx && yy == endy) ? "" : KinkyDungeonMapGet(xx, yy);
+-                        MapTile = KinkyDungeonTilesGet(loc);
+-                        let locIndex = `${lowLoc},${endx},${endy},${tileShort}`;
++                        const sourceTileMembershipLookup = sourceTileMembershipTable
++                            && typeof tile === "string"
++                            && tile.length === 1;
++                        let sourceTileIncluded = sourceTileMembershipLookup
++                            ? sourceTileMembershipTable[tile.charCodeAt(0)] === 1
++                            : TilesTemp.includes(tile);
++                        if (sourceTileMembershipTableStats) {
++                            sourceTileMembershipTableStats.lookups =
++                                (sourceTileMembershipTableStats.lookups || 0) + 1;
++                            const key = sourceTileMembershipLookup ? "optimizedLookups" : "fallbackLookups";
++                            sourceTileMembershipTableStats[key] =
++                                (sourceTileMembershipTableStats[key] || 0) + 1;
++                            if (sourceTileMembershipLookup
++                                && sourceTileMembershipTableStats.verify === true) {
++                                const expected = TilesTemp.includes(tile);
++                                sourceTileMembershipTableStats.verifierChecks =
++                                    (sourceTileMembershipTableStats.verifierChecks || 0) + 1;
++                                if (sourceTileIncluded !== expected) {
++                                    sourceTileMembershipTableStats.mismatches =
++                                        (sourceTileMembershipTableStats.mismatches || 0) + 1;
++                                    if (!sourceTileMembershipTableStats.firstMismatch)
++                                        sourceTileMembershipTableStats.firstMismatch = {
++                                            tiles: TilesTemp,
++                                            tile,
++                                            expected,
++                                            actual: sourceTileIncluded,
++                                        };
++                                    sourceTileIncluded = expected;
++                                }
++                            }
++                        }
++                        if (!sourceDeferredTileMetadata)
++                            MapTile = KinkyDungeonTilesGet(loc);
++                        if (!sourceHoistedCacheIndex)
++                            locIndex = `${lowLoc},${endx},${endy},${tileShort}`;
+                         if (xx == endx && yy == endy) {
+-                            closed.set(lowLoc, lowest);
+-                            let newPath = KinkyDungeonGetPath(closed, lowest.x, lowest.y, endx, endy);
++                            closed.set(lowKey, lowest);
++                            let newPath = sourceNumericCoordinateKeys
++                                ? KDHybridGetNumericCoordinatePath(closed, lowKey, endx, endy)
++                                : KinkyDungeonGetPath(closed, lowest.x, lowest.y, endx, endy);
+                             if (!blockEnemy && !blockPlayer && !RequireLight && !noDoors && !needDoorMemory) {
+                                 if (ignoreLocks) {
+                                     if (!KDPathCacheIgnoreLocks.has(index))
+-                                        KDSetPathfindCache(KDPathCacheIgnoreLocks, newPath, endx, endy, tileShort, index);
++                                        KDSetPathfindCache(KDPathCacheIgnoreLocks, newPath, endx, endy, tileShort, index, undefined, undefined, startKey, KDHybridPathfindingNumericContinuationIndexDependencies);
+                                 }
+                                 else {
+                                     if (!KDPathCache.has(index))
+-                                        KDSetPathfindCache(KDPathCache, newPath, endx, endy, tileShort, index);
++                                        KDSetPathfindCache(KDPathCache, newPath, endx, endy, tileShort, index, undefined, undefined, startKey, KDHybridPathfindingNumericContinuationIndexDependencies);
+                                 }
+                             }
+                             KDPathfindingCacheFails++;
+@@ -105743,19 +107256,37 @@ function KinkyDungeonFindPath(startx, starty, endx, endy, blockEnemy, blockPlaye
+                             else
+                                 return undefined;
+                         }
+-                        else if (!blockEnemy && !blockPlayer && !RequireLight && !noDoors && !needDoorMemory
+-                            && ((ignoreLocks && KDPathCacheIgnoreLocks.has(locIndex)) || (!ignoreLocks && KDPathCache.has(locIndex)))) {
++                        else if (sourceContinuationCacheLookup
++                            ? continuationCacheHit
++                            : !blockEnemy && !blockPlayer && !RequireLight && !noDoors && !needDoorMemory
++                                && ((ignoreLocks && KDPathCacheIgnoreLocks.has(locIndex)) || (!ignoreLocks && KDPathCache.has(locIndex)))) {
+                             let newPath = [];
+-                            if (ignoreLocks) {
+-                                closed.set(lowLoc, lowest);
+-                                newPath = KinkyDungeonGetPath(closed, lowest.x, lowest.y);
++                            let knownCachedTailStart = undefined;
++                            if (sourceContinuationCacheLookup) {
++                                closed.set(lowKey, lowest);
++                                newPath = sourceNumericCoordinateKeys
++                                    ? KDHybridGetNumericCoordinatePath(closed, lowKey)
++                                    : KinkyDungeonGetPath(closed, lowest.x, lowest.y);
++                                if (KDHybridPathCacheKnownTailCompatible(newPath, continuationCachePath, sourceControl))
++                                    knownCachedTailStart = newPath.length;
++                                let endPath = continuationCachePath.slice(0);
++                                KDPathfindingCacheHits++;
++                                newPath.push(...endPath);
++                            }
++                            else if (ignoreLocks) {
++                                closed.set(lowKey, lowest);
++                                newPath = sourceNumericCoordinateKeys
++                                    ? KDHybridGetNumericCoordinatePath(closed, lowKey)
++                                    : KinkyDungeonGetPath(closed, lowest.x, lowest.y);
+                                 let endPath = KDPathCacheIgnoreLocks.get(locIndex).slice(0);
+                                 KDPathfindingCacheHits++;
+                                 newPath.push(...endPath);
+                             }
+                             else {
+-                                closed.set(lowLoc, lowest);
+-                                newPath = KinkyDungeonGetPath(closed, lowest.x, lowest.y);
++                                closed.set(lowKey, lowest);
++                                newPath = sourceNumericCoordinateKeys
++                                    ? KDHybridGetNumericCoordinatePath(closed, lowKey)
++                                    : KinkyDungeonGetPath(closed, lowest.x, lowest.y);
+                                 let endPath = KDPathCache.get(locIndex).slice(0);
+                                 KDPathfindingCacheHits++;
+                                 newPath.push(...endPath);
+@@ -105764,25 +107295,40 @@ function KinkyDungeonFindPath(startx, starty, endx, endy, blockEnemy, blockPlaye
+                                 if (newPath[0] && KDistChebyshev(newPath[0].x - startx, newPath[0].y - starty) < 1.5) {
+                                     if (ignoreLocks) {
+                                         if (!KDPathCacheIgnoreLocks.has(index))
+-                                            KDSetPathfindCache(KDPathCacheIgnoreLocks, newPath, endx, endy, tileShort, index);
++                                            KDSetPathfindCache(KDPathCacheIgnoreLocks, newPath, endx, endy, tileShort, index, knownCachedTailStart, KDHybridPathCacheKnownTailDependencies, startKey, KDHybridPathfindingNumericContinuationIndexDependencies);
+                                     }
+                                     else {
+                                         if (!KDPathCache.has(index))
+-                                            KDSetPathfindCache(KDPathCache, newPath, endx, endy, tileShort, index);
++                                            KDSetPathfindCache(KDPathCache, newPath, endx, endy, tileShort, index, knownCachedTailStart, KDHybridPathCacheKnownTailDependencies, startKey, KDHybridPathfindingNumericContinuationIndexDependencies);
+                                     }
+                                     return newPath;
+                                 }
+                                 else if (ignoreLocks) {
++                                    if (sourceNumericContinuationIndex) {
++                                        lowLoc = lowest.x + "," + lowest.y;
++                                        locIndex = `${lowLoc},${endx},${endy},${tileShort}`;
++                                    }
+                                     KDPathCacheIgnoreLocks.delete(locIndex);
++                                    KDHybridDeletePathfindingNumericContinuationEntry(KDPathCacheIgnoreLocks, lowest.x, lowest.y, endx, endy, tileShort, sourceControl);
+                                 }
+                                 else {
++                                    if (sourceNumericContinuationIndex) {
++                                        lowLoc = lowest.x + "," + lowest.y;
++                                        locIndex = `${lowLoc},${endx},${endy},${tileShort}`;
++                                    }
+                                     KDPathCache.delete(locIndex);
++                                    KDHybridDeletePathfindingNumericContinuationEntry(KDPathCache, lowest.x, lowest.y, endx, endy, tileShort, sourceControl);
++                                }
++                                if (sourceContinuationCacheLookup) {
++                                    continuationCacheHit = false;
++                                    continuationCachePath = undefined;
+                                 }
+                             }
+                             else
+                                 return undefined;
+                         }
+-                        else if (TilesTemp.includes(tile) && (!RequireLight || KinkyDungeonVisionGet(xx, yy) > 0)
++                        else if (sourceTileIncluded && (!RequireLight || KinkyDungeonVisionGet(xx, yy) > 0)
++                            && (!sourceDeferredTileMetadata || ((MapTile = KinkyDungeonTilesGet(loc)), true))
+                             && (ignoreLocks || !MapTile || !MapTile.Lock || (Enemy && KDLocks[MapTile.Lock].canNPCPass(xx, yy, MapTile, Enemy)))
+                             && (!blockEnemy || (Leashtarget > 0 && Leashtarget == KinkyDungeonEnemyAt(xx, yy)?.leash?.entity) || KinkyDungeonNoEnemyExceptSub(xx, yy, false, Enemy)
+                                 || (allowPassable && KDCanPassEnemy(KDPlayer(), KinkyDungeonEnemyAt(xx, yy))))
+@@ -105831,26 +107377,71 @@ function KinkyDungeonFindPath(startx, starty, endx, endy, blockEnemy, blockPlaye
+                                         costBonus += 0.22;
+                                 }
+                             }
+-                            succ.set(xx + "," + yy, { x: xx, y: yy,
++                            const successor = { x: xx, y: yy,
+                                 g: moveCost + costBonus + lowest.g,
+                                 f: moveCost + costBonus + lowest.g + heur(xx, yy, endx, endy),
+-                                s: lowLoc });
++                                s: sourceNumericCoordinateKeys ? lowKey : lowLoc };
++                            if (sourceDirectSuccessors) {
++                                const q = sourceNumericCoordinateKeys
++                                    ? xx + yy * numericCoordinateKeyStride
++                                    : xx + "," + yy;
++                                if (numericCoordinateKeyVerifier) {
++                                    sourceNumericCoordinateKeyStats.keyChecks =
++                                        (sourceNumericCoordinateKeyStats.keyChecks || 0) + 1;
++                                    const previousLocation = numericCoordinateKeyVerifier.get(q);
++                                    if (previousLocation !== undefined && previousLocation !== loc) {
++                                        sourceNumericCoordinateKeyStats.collisions =
++                                            (sourceNumericCoordinateKeyStats.collisions || 0) + 1;
++                                        if (!sourceNumericCoordinateKeyStats.firstCollision)
++                                            sourceNumericCoordinateKeyStats.firstCollision = {
++                                                key: q,
++                                                previousLocation,
++                                                location: loc,
++                                            };
++                                    }
++                                    else if (previousLocation === undefined)
++                                        numericCoordinateKeyVerifier.set(q, loc);
++                                }
++                                if (sourceClosedFirstSuccessors) {
++                                    const closedSucc = closed.get(q);
++                                    if (!closedSucc || closedSucc.f > successor.f) {
++                                        const openSucc = open.get(q);
++                                        if (!openSucc || openSucc.f > successor.f) {
++                                            open.set(q, successor);
++                                        }
++                                    }
++                                }
++                                else {
++                                    const openSucc = open.get(q);
++                                    if (!openSucc || openSucc.f > successor.f) {
++                                        const closedSucc = closed.get(q);
++                                        if (!closedSucc || closedSucc.f > successor.f) {
++                                            open.set(q, successor);
++                                        }
++                                    }
++                                }
++                            }
++                            else {
++                                succ.set(xx + "," + yy, successor);
++                            }
+                         }
+                     }
+                 }
+             }
+-            succ.forEach(s => {
+-                let q = s.x + "," + s.y;
+-                let openSucc = open.get(q);
+-                if (!openSucc || openSucc.f > s.f) {
+-                    let closedSucc = closed.get(q);
+-                    if (!closedSucc || closedSucc.f > s.f) {
+-                        open.set(q, s);
++            if (!sourceDirectSuccessors) {
++                succ.forEach(s => {
++                    let q = s.x + "," + s.y;
++                    let openSucc = open.get(q);
++                    if (!openSucc || openSucc.f > s.f) {
++                        let closedSucc = closed.get(q);
++                        if (!closedSucc || closedSucc.f > s.f) {
++                            open.set(q, s);
++                        }
+                     }
+-                }
+-            });
+-            open.delete(lowLoc);
+-            closed.set(lowLoc, lowest);
++                });
++            }
++            open.delete(lowKey);
++            closed.set(lowKey, lowest);
+         }
+         else {
+             open.clear();
+@@ -105874,14 +107465,342 @@ function KinkyDungeonGetPath(closed, xx, yy, endx, endy) {
+     }
+     return list.reverse();
+ }
++const KDHybridPathCacheDependencies = {
++    map: Map,
++    mapGet: Map.prototype.get,
++    mapSet: Map.prototype.set,
++    slice: Array.prototype.slice,
++};
++function KDHybridPathCacheSingleSliceCompatible(newPath, sourceControl) {
++    return !sourceControl?.disablePathCacheSingleSlice
++        && Array.isArray(newPath)
++        && newPath.constructor === Array
++        && newPath.slice === KDHybridPathCacheDependencies.slice
++        && Array.prototype.slice === KDHybridPathCacheDependencies.slice;
++}
++function KDHybridPathCacheHoistedKeySuffixCompatible(endx, endy, Tiles, sourceControl) {
++    return !sourceControl?.disablePathCacheHoistedKeySuffix
++        && typeof endx === "number"
++        && typeof endy === "number"
++        && typeof Tiles === "string";
++}
++function KDHybridPathCacheEdgeIdentityCompatible(PathMap, sourceFastPath, sourceControl) {
++    return sourceFastPath
++        && sourceControl?.enablePathCacheEdgeIdentitySkip === true
++        && !sourceControl?.disablePathCacheEdgeIdentitySkip
++        && !KDModsLoaded
++        && KDAllModFiles.length === 0
++        && Map === KDHybridPathCacheDependencies.map
++        && Map.prototype.get === KDHybridPathCacheDependencies.mapGet
++        && Map.prototype.set === KDHybridPathCacheDependencies.mapSet
++        && (PathMap === KDPathCache || PathMap === KDPathCacheIgnoreLocks)
++        && PathMap.constructor === Map
++        && PathMap.get === KDHybridPathCacheDependencies.mapGet
++        && PathMap.set === KDHybridPathCacheDependencies.mapSet;
++}
++const KDHybridPathCacheKnownTailDependencies = {
++    array: Array,
++    arrayIsArray: Array.isArray,
++    push: Array.prototype.push,
++    slice: Array.prototype.slice,
++    setPathfindCache: KDSetPathfindCache,
++    numberIsInteger: Number.isInteger,
++};
++function KDHybridPathCacheKnownTailCompatible(prefix, cachedTail, sourceControl) {
++    return sourceControl?.enablePathCacheEdgeIdentitySkip === true
++        && !sourceControl?.disablePathCacheKnownTailSkip
++        && !KDModsLoaded
++        && KDAllModFiles.length === 0
++        && Array === KDHybridPathCacheKnownTailDependencies.array
++        && Array.isArray === KDHybridPathCacheKnownTailDependencies.arrayIsArray
++        && Array.prototype.push === KDHybridPathCacheKnownTailDependencies.push
++        && Array.prototype.slice === KDHybridPathCacheKnownTailDependencies.slice
++        && Array.isArray(prefix)
++        && prefix.constructor === Array
++        && prefix.push === KDHybridPathCacheKnownTailDependencies.push
++        && prefix.slice === KDHybridPathCacheKnownTailDependencies.slice
++        && Array.isArray(cachedTail)
++        && cachedTail.constructor === Array
++        && cachedTail.slice === KDHybridPathCacheKnownTailDependencies.slice
++        && KDSetPathfindCache === KDHybridPathCacheKnownTailDependencies.setPathfindCache
++        && Number.isInteger === KDHybridPathCacheKnownTailDependencies.numberIsInteger;
++}
++globalThis.KDHybridSourcePatches =
++    globalThis.KDHybridSourcePatches || {};
++globalThis.KDHybridSourcePatches.pathCacheSingleSlice =
++    "5.4.92-source-v1";
++globalThis.KDHybridSourcePatches.pathCacheHoistedKeySuffix =
++    "5.4.92-source-v1";
++globalThis.KDHybridSourcePatches.pathCacheEdgeIdentitySkip =
++    "5.4.92-source-v1";
++globalThis.KDHybridSourcePatches.pathCacheKnownTailSkip =
++    "5.4.92-source-v1";
+ function KDSetPathfindCache(PathMap, newPath, endx, endy, Tiles, Finalindex) {
+-    for (let i = 0; i < newPath.length - 1; i++) {
+-        let path = newPath.slice(i);
+-        let index = `${path[0].x},${path[0].y},${endx},${endy},${Tiles}`;
+-        PathMap.set(index, path.slice(1));
++    const sourceControl = globalThis.KDHybridSourcePatchControl;
++    const sourceFastPath = KDHybridPathCacheSingleSliceCompatible(newPath, sourceControl);
++    const sourceHoistedKeySuffix = KDHybridPathCacheHoistedKeySuffixCompatible(endx, endy, Tiles, sourceControl);
++    let sourceEdgeIdentitySkip = KDHybridPathCacheEdgeIdentityCompatible(PathMap, sourceFastPath, sourceControl);
++    const knownTailStart = arguments[6];
++    const knownTailToken = arguments[7];
++    const numericContinuationStartKey = arguments[8];
++    const numericContinuationToken = arguments[9];
++    let sourceNumericContinuationWriterRecord = numericContinuationToken === KDHybridPathfindingNumericContinuationIndexDependencies
++        && sourceEdgeIdentitySkip
++        ? KDHybridGetPathfindingNumericContinuationRecord(PathMap, sourceControl, true)
++        : undefined;
++    if (sourceNumericContinuationWriterRecord
++        && (!Number.isInteger(numericContinuationStartKey)
++            || numericContinuationStartKey < 0
++            || numericContinuationStartKey >= sourceNumericContinuationWriterRecord.width * sourceNumericContinuationWriterRecord.height)) {
++        KDHybridPathfindingNumericContinuationIndexes.delete(PathMap);
++        sourceNumericContinuationWriterRecord = undefined;
++    }
++    let sourceNumericContinuationWriterSuffix = sourceNumericContinuationWriterRecord
++        ? KDHybridGetPathfindingNumericContinuationSuffix(sourceNumericContinuationWriterRecord, endx, endy, Tiles, true)
++        : undefined;
++    if (!sourceNumericContinuationWriterRecord
++        && (PathMap === KDPathCache || PathMap === KDPathCacheIgnoreLocks))
++        KDHybridPathfindingNumericContinuationIndexes.delete(PathMap);
++    const numericContinuationIndexStats = sourceControl?.pathfindingNumericContinuationIndexStats;
++    if (numericContinuationIndexStats) {
++        numericContinuationIndexStats.writerCalls =
++            (numericContinuationIndexStats.writerCalls || 0) + 1;
++        const key = sourceNumericContinuationWriterRecord ? "optimizedWriterCalls" : "fallbackWriterCalls";
++        numericContinuationIndexStats[key] =
++            (numericContinuationIndexStats[key] || 0) + 1;
++    }
++    let sourceKnownTailSkip = sourceEdgeIdentitySkip
++        && !sourceControl?.disablePathCacheKnownTailSkip
++        && knownTailToken === KDHybridPathCacheKnownTailDependencies
++        && Number.isInteger === KDHybridPathCacheKnownTailDependencies.numberIsInteger
++        && Number.isInteger(knownTailStart)
++        && knownTailStart > 0
++        && knownTailStart < newPath.length;
++    const sourceStats = sourceControl?.pathCacheSingleSliceStats;
++    if (sourceStats) {
++        sourceStats.calls = (sourceStats.calls || 0) + 1;
++        const key = sourceFastPath ? "optimizedCalls" : "fallbackCalls";
++        sourceStats[key] = (sourceStats[key] || 0) + 1;
++    }
++    const keySuffixStats = sourceControl?.pathCacheHoistedKeySuffixStats;
++    if (keySuffixStats) {
++        keySuffixStats.calls = (keySuffixStats.calls || 0) + 1;
++        const key = sourceHoistedKeySuffix ? "optimizedCalls" : "fallbackCalls";
++        keySuffixStats[key] = (keySuffixStats[key] || 0) + 1;
++    }
++    const edgeIdentityStats = sourceControl?.pathCacheEdgeIdentitySkipStats;
++    if (edgeIdentityStats) {
++        edgeIdentityStats.calls = (edgeIdentityStats.calls || 0) + 1;
++        const key = sourceEdgeIdentitySkip ? "optimizedCalls" : "fallbackCalls";
++        edgeIdentityStats[key] = (edgeIdentityStats[key] || 0) + 1;
++    }
++    const cacheKeySuffix = sourceHoistedKeySuffix
++        ? `,${endx},${endy},${Tiles}`
++        : "";
++    const knownTailStats = sourceControl?.pathCacheKnownTailStats;
++    if (sourceKnownTailSkip) {
++        const lastSourceIndex = newPath.length - 2;
++        const lastPoint = newPath[lastSourceIndex];
++        const lastIndex = sourceHoistedKeySuffix
++            ? `${lastPoint.x},${lastPoint.y}${cacheKeySuffix}`
++            : `${lastPoint.x},${lastPoint.y},${endx},${endy},${Tiles}`;
++        const lastExisting = PathMap.get(lastIndex);
++        const lastEntryExact = Array.isArray(lastExisting)
++            && lastExisting.constructor === Array
++            && lastExisting.length === 1
++            && lastExisting[0] === newPath[newPath.length - 1];
++        if (knownTailStats) {
++            const key = lastEntryExact
++                ? "sentinelAcceptedCalls"
++                : "sentinelFallbackCalls";
++            knownTailStats[key] = (knownTailStats[key] || 0) + 1;
++        }
++        if (!lastEntryExact)
++            sourceKnownTailSkip = false;
++    }
++    if (sourceKnownTailSkip && knownTailStats?.verify === true) {
++        for (let i = knownTailStart - 1; i < newPath.length - 1; i++) {
++            const point = newPath[i];
++            const index = sourceHoistedKeySuffix
++                ? `${point.x},${point.y}${cacheKeySuffix}`
++                : `${point.x},${point.y},${endx},${endy},${Tiles}`;
++            const existing = PathMap.get(index);
++            const expectedLength = newPath.length - i - 1;
++            let exact = Array.isArray(existing)
++                && existing.constructor === Array
++                && existing.length === expectedLength;
++            if (exact) {
++                for (let pointIndex = 0; pointIndex < expectedLength; pointIndex++) {
++                    if (existing[pointIndex] !== newPath[i + pointIndex + 1]) {
++                        exact = false;
++                        break;
++                    }
++                }
++            }
++            knownTailStats.verifiedEntries =
++                (knownTailStats.verifiedEntries || 0) + 1;
++            if (!exact) {
++                knownTailStats.mismatches =
++                    (knownTailStats.mismatches || 0) + 1;
++                if (!knownTailStats.firstMismatch) {
++                    knownTailStats.firstMismatch = {
++                        pathLength: newPath.length,
++                        knownTailStart,
++                        sourceIndex: i,
++                    };
++                }
++                sourceKnownTailSkip = false;
++                sourceEdgeIdentitySkip = false;
++                break;
++            }
++        }
++    }
++    if (sourceKnownTailSkip
++        && sourceNumericContinuationWriterSuffix
++        && numericContinuationIndexStats?.verify === true) {
++        for (let i = knownTailStart - 1; i < newPath.length - 1; i++) {
++            const point = newPath[i];
++            const coordinateKey = KDHybridPathfindingNumericContinuationCoordinateKey(sourceNumericContinuationWriterRecord, point.x, point.y);
++            const index = sourceHoistedKeySuffix
++                ? `${point.x},${point.y}${cacheKeySuffix}`
++                : `${point.x},${point.y},${endx},${endy},${Tiles}`;
++            const existing = PathMap.get(index);
++            const shadow = coordinateKey === undefined
++                ? undefined
++                : sourceNumericContinuationWriterSuffix.get(coordinateKey);
++            numericContinuationIndexStats.writerChecks =
++                (numericContinuationIndexStats.writerChecks || 0) + 1;
++            if (coordinateKey === undefined || shadow !== existing) {
++                numericContinuationIndexStats.writerMismatches =
++                    (numericContinuationIndexStats.writerMismatches || 0) + 1;
++                if (!numericContinuationIndexStats.firstWriterMismatch)
++                    numericContinuationIndexStats.firstWriterMismatch = {
++                        phase: "known-tail",
++                        sourceIndex: i,
++                        coordinateKey,
++                        identityMatch: shadow === existing,
++                    };
++                KDHybridPathfindingNumericContinuationIndexes.delete(PathMap);
++                sourceNumericContinuationWriterRecord = undefined;
++                sourceNumericContinuationWriterSuffix = undefined;
++                break;
++            }
++        }
++    }
++    if (!sourceEdgeIdentitySkip && sourceNumericContinuationWriterRecord) {
++        KDHybridPathfindingNumericContinuationIndexes.delete(PathMap);
++        sourceNumericContinuationWriterRecord = undefined;
++        sourceNumericContinuationWriterSuffix = undefined;
++    }
++    if (knownTailStats) {
++        knownTailStats.calls = (knownTailStats.calls || 0) + 1;
++        const key = sourceKnownTailSkip ? "optimizedCalls" : "fallbackCalls";
++        knownTailStats[key] = (knownTailStats[key] || 0) + 1;
++    }
++    const writeLimit = sourceKnownTailSkip
++        ? knownTailStart - 1
++        : newPath.length - 1;
++    if (sourceKnownTailSkip) {
++        const skippedEntries = newPath.length - knownTailStart;
++        if (knownTailStats)
++            knownTailStats.skippedEntries =
++                (knownTailStats.skippedEntries || 0) + skippedEntries;
++        if (edgeIdentityStats)
++            edgeIdentityStats.skippedEntries =
++                (edgeIdentityStats.skippedEntries || 0) + skippedEntries;
++    }
++    if (sourceFastPath) {
++        const finalPoint = sourceEdgeIdentitySkip
++            ? newPath[newPath.length - 1]
++            : undefined;
++        for (let i = 0; i < writeLimit; i++) {
++            const point = newPath[i];
++            const index = sourceHoistedKeySuffix
++                ? `${point.x},${point.y}${cacheKeySuffix}`
++                : `${point.x},${point.y},${endx},${endy},${Tiles}`;
++            if (sourceEdgeIdentitySkip) {
++                const expectedLength = newPath.length - i - 1;
++                const existing = PathMap.get(index);
++                if (Array.isArray(existing)
++                    && existing.constructor === Array
++                    && existing.length === expectedLength
++                    && existing[0] === newPath[i + 1]
++                    && existing[expectedLength - 1] === finalPoint) {
++                    if (sourceNumericContinuationWriterSuffix) {
++                        const coordinateKey = KDHybridPathfindingNumericContinuationCoordinateKey(sourceNumericContinuationWriterRecord, point.x, point.y);
++                        const shadow = coordinateKey === undefined
++                            ? undefined
++                            : sourceNumericContinuationWriterSuffix.get(coordinateKey);
++                        if (coordinateKey === undefined
++                            || (numericContinuationIndexStats?.verify === true
++                                && shadow !== existing)) {
++                            if (numericContinuationIndexStats?.verify === true) {
++                                numericContinuationIndexStats.writerChecks =
++                                    (numericContinuationIndexStats.writerChecks || 0) + 1;
++                                numericContinuationIndexStats.writerMismatches =
++                                    (numericContinuationIndexStats.writerMismatches || 0) + 1;
++                                if (!numericContinuationIndexStats.firstWriterMismatch)
++                                    numericContinuationIndexStats.firstWriterMismatch = {
++                                        phase: "edge-identity",
++                                        sourceIndex: i,
++                                        coordinateKey,
++                                        identityMatch: shadow === existing,
++                                    };
++                            }
++                            KDHybridPathfindingNumericContinuationIndexes.delete(PathMap);
++                            sourceNumericContinuationWriterRecord = undefined;
++                            sourceNumericContinuationWriterSuffix = undefined;
++                        }
++                        else if (numericContinuationIndexStats?.verify === true)
++                            numericContinuationIndexStats.writerChecks =
++                                (numericContinuationIndexStats.writerChecks || 0) + 1;
++                    }
++                    if (edgeIdentityStats)
++                        edgeIdentityStats.skippedEntries =
++                            (edgeIdentityStats.skippedEntries || 0) + 1;
++                    continue;
++                }
++            }
++            const suffix = newPath.slice(i + 1);
++            PathMap.set(index, suffix);
++            if (sourceNumericContinuationWriterSuffix) {
++                const coordinateKey = KDHybridPathfindingNumericContinuationCoordinateKey(sourceNumericContinuationWriterRecord, point.x, point.y);
++                if (coordinateKey === undefined) {
++                    KDHybridPathfindingNumericContinuationIndexes.delete(PathMap);
++                    sourceNumericContinuationWriterRecord = undefined;
++                    sourceNumericContinuationWriterSuffix = undefined;
++                }
++                else {
++                    sourceNumericContinuationWriterSuffix.set(coordinateKey, suffix);
++                    if (numericContinuationIndexStats)
++                        numericContinuationIndexStats.indexedWrites =
++                            (numericContinuationIndexStats.indexedWrites || 0) + 1;
++                }
++            }
++            if (edgeIdentityStats)
++                edgeIdentityStats.writtenEntries =
++                    (edgeIdentityStats.writtenEntries || 0) + 1;
++        }
++    }
++    else {
++        for (let i = 0; i < newPath.length - 1; i++) {
++            let path = newPath.slice(i);
++            let index = sourceHoistedKeySuffix
++                ? `${path[0].x},${path[0].y}${cacheKeySuffix}`
++                : `${path[0].x},${path[0].y},${endx},${endy},${Tiles}`;
++            PathMap.set(index, path.slice(1));
++        }
++    }
++    if (Finalindex) {
++        const finalPath = newPath.slice(0);
++        PathMap.set(Finalindex, finalPath);
++        if (sourceNumericContinuationWriterSuffix) {
++            sourceNumericContinuationWriterSuffix.set(numericContinuationStartKey, finalPath);
++            if (numericContinuationIndexStats)
++                numericContinuationIndexStats.indexedWrites =
++                    (numericContinuationIndexStats.indexedWrites || 0) + 1;
++        }
+     }
+-    if (Finalindex)
+-        PathMap.set(Finalindex, newPath.slice(0));
+ }
+ function KDUpdateBuffsOnLoad() {
+     if (VersionMajor <= 5 && VersionMinor <= 4 && VersionPatch <= 43) {
+@@ -105924,9 +107843,95 @@ function KDUpdateBuffsOnLoad() {
+         }
+     }
+ }
++const KDHybridBuffEventActivationThreshold = 2;
++let KDHybridBuffEventTriggers = null;
++let KDHybridBuffEventMapHits = 0;
++let KDHybridBuffEventTick = Number.NaN;
++let KDHybridBuffEventPlayerBuffs = null;
++let KDHybridBuffEventEntities = null;
++let KDHybridBuffEventEntityCount = -1;
++let KDHybridCanonicalApplyBuffToEntity;
++let KDHybridCanonicalApplyBuff;
++function KDHybridBuffEventStats() {
++    return globalThis.KDHybridSourcePatchControl?.buffEventIndexStats;
++}
++function KDHybridInvalidateBuffEventIndex() {
++    KDHybridBuffEventTriggers = null;
++    KDHybridBuffEventMapHits = 0;
++    const stats = KDHybridBuffEventStats();
++    if (stats)
++        stats.invalidations = (stats.invalidations || 0) + 1;
++}
++globalThis.KDHybridInvalidateBuffEventIndex = KDHybridInvalidateBuffEventIndex;
++function KDHybridRefreshBuffEventEpoch() {
++    if (KDHybridBuffEventTick !== KinkyDungeonCurrentTick
++        || KDHybridBuffEventPlayerBuffs !== KinkyDungeonPlayerBuffs
++        || KDHybridBuffEventEntities !== KDMapData.Entities
++        || KDHybridBuffEventEntityCount !== KDMapData.Entities.length) {
++        KDHybridBuffEventTriggers = null;
++        KDHybridBuffEventMapHits = 0;
++        KDHybridBuffEventTick = KinkyDungeonCurrentTick;
++        KDHybridBuffEventPlayerBuffs = KinkyDungeonPlayerBuffs;
++        KDHybridBuffEventEntities = KDMapData.Entities;
++        KDHybridBuffEventEntityCount = KDMapData.Entities.length;
++    }
++}
++function KDHybridAddBuffEventTriggers(buff) {
++    if (!KDHybridBuffEventTriggers || !buff?.events)
++        return;
++    for (const event of buff.events) {
++        if (event?.trigger !== undefined)
++            KDHybridBuffEventTriggers.add(event.trigger);
++    }
++}
++function KDHybridBuildBuffEventIndex() {
++    KDHybridBuffEventTriggers = new Set();
++    for (const buff of Object.values(KinkyDungeonPlayerBuffs || {}))
++        KDHybridAddBuffEventTriggers(buff);
++    for (const entity of KDMapData.Entities) {
++        if (entity.buffs)
++            for (const buff of Object.values(entity.buffs))
++                KDHybridAddBuffEventTriggers(buff);
++    }
++    const stats = KDHybridBuffEventStats();
++    if (stats) {
++        stats.rebuilds = (stats.rebuilds || 0) + 1;
++        stats.indexedTriggers = (stats.indexedTriggers || 0)
++            + KDHybridBuffEventTriggers.size;
++    }
++}
++function KDHybridBuffEventIndexCompatible(control) {
++    return !control?.disableBuffEventIndex
++        && KinkyDungeonApplyBuffToEntity === KDHybridCanonicalApplyBuffToEntity
++        && KDApplyBuff === KDHybridCanonicalApplyBuff;
++}
+ function KinkyDungeonSendBuffEvent(event, data) {
+     if (!KDMapHasEvent(KDEventMapBuff, event))
+         return;
++    const sourceControl = globalThis.KDHybridSourcePatchControl;
++    const stats = sourceControl?.buffEventIndexStats;
++    if (stats)
++        stats.calls = (stats.calls || 0) + 1;
++    if (KDHybridBuffEventIndexCompatible(sourceControl)) {
++        KDHybridRefreshBuffEventEpoch();
++        if (!KDHybridBuffEventTriggers) {
++            KDHybridBuffEventMapHits += 1;
++            if (KDHybridBuffEventMapHits >= KDHybridBuffEventActivationThreshold)
++                KDHybridBuildBuffEventIndex();
++            else if (stats)
++                stats.warmupScans = (stats.warmupScans || 0) + 1;
++        }
++        if (KDHybridBuffEventTriggers && !KDHybridBuffEventTriggers.has(event)) {
++            if (stats)
++                stats.negativeSkips = (stats.negativeSkips || 0) + 1;
++            return;
++        }
++    }
++    else if (stats) {
++        stats.dependencyFallbacks = (stats.dependencyFallbacks || 0) + 1;
++    }
++    if (stats)
++        stats.fallbackScans = (stats.fallbackScans || 0) + 1;
+     for (let buff of Object.values(KinkyDungeonPlayerBuffs)) {
+         if (buff && buff.events) {
+             for (let e of buff.events) {
+@@ -106277,9 +108282,18 @@ function KDApplyBuff(list, origbuff, changes, entity) {
+                     KinkyDungeonBlindLevelBase = Math.max(KinkyDungeonBlindLevelBase, 2);
+                 }
+             }
++        if (KDHybridBuffEventTriggers && list[id]?.events?.length) {
++            KDHybridAddBuffEventTriggers(list[id]);
++            const stats = KDHybridBuffEventStats();
++            if (stats)
++                stats.eventfulApplies = (stats.eventfulApplies || 0) + 1;
++        }
+         return buff;
+     }
+ }
++KDHybridCanonicalApplyBuffToEntity = KinkyDungeonApplyBuffToEntity;
++KDHybridCanonicalApplyBuff = KDApplyBuff;
++globalThis.KDHybridSourcePatches.buffEventNegativeIndex = "5.4.92-source-v1";
+ function KinkyDungeonGetbuff(list, buffId) {
+     if (list && list[buffId])
+         return list[buffId];
+@@ -229410,4 +231424,4 @@ let KDPlayerTitles = {
+ };
+ let KDPlayerTitleCategories = {};
+ KDPlayerTitlesRefreshCategories();
+-//# sourceMappingURL=main.js.map
+\ No newline at end of file
++//# sourceMappingURL=main.js.map

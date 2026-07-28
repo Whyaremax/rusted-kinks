@@ -1,10 +1,25 @@
-import { mkdtemp, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  rm,
+  stat,
+  writeFile
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { KNOWN_BUNDLES, install, status, uninstall } from "./patcher.js";
+import {
+  KNOWN_BUNDLES,
+  install,
+  status,
+  uninstall,
+  updateConfiguration,
+  updatePathfindingMode,
+  updateTextureMode
+} from "./patcher.js";
 
 const fixtures: string[] = [];
 
@@ -79,6 +94,95 @@ describe("reversible patcher", () => {
     );
     expect((await status(fixture.appRoot)).state).toBe("modified");
     await expect(uninstall(fixture.appRoot)).rejects.toThrow(/changed/u);
+  });
+
+  it("updates the persisted planner mode without replacing the backup", async () => {
+    const fixture = await createFixture();
+    const original = await readFile(join(fixture.appRoot, "index.html"));
+    const installed = await install({
+      appRoot: fixture.appRoot,
+      payloadRoot: fixture.payloadRoot,
+      toolVersion: "test",
+      allowUnknownBundle: true,
+      pathfindingMode: "quality"
+    });
+    const backupPath = installed.manifest?.index.backupPath;
+
+    const updated = await updatePathfindingMode(fixture.appRoot, "human");
+    expect(updated.state).toBe("installed");
+    expect(updated.manifest?.settings?.pathfindingMode).toBe("human");
+    expect(updated.manifest?.settings?.textureMode).toBe("auto");
+    expect(updated.manifest?.index.backupPath).toBe(backupPath);
+    expect(await readFile(join(fixture.appRoot, "index.html"), "utf8")).toContain(
+      '"pathfindingMode":"human"'
+    );
+
+    await uninstall(fixture.appRoot);
+    expect(await readFile(join(fixture.appRoot, "index.html"))).toEqual(original);
+    expect(await readFile(fixture.saveSentinel, "utf8")).toBe("do-not-touch");
+  });
+
+  it("atomically configures mobile, full, original, and automatic texture selection", async () => {
+    const fixture = await createFixture();
+    const original = await readFile(join(fixture.appRoot, "index.html"));
+    const installed = await install({
+      appRoot: fixture.appRoot,
+      payloadRoot: fixture.payloadRoot,
+      toolVersion: "test",
+      allowUnknownBundle: true,
+      pathfindingMode: "quality",
+      textureMode: "full"
+    });
+    const backupPath = installed.manifest?.index.backupPath;
+    expect(await readFile(join(fixture.appRoot, "index.html"), "utf8")).toContain(
+      '"rendering":{"textureMode":"full"}'
+    );
+
+    for (const mode of ["mobile", "original"] as const) {
+      const updated = await updateTextureMode(fixture.appRoot, mode);
+      expect(updated.state).toBe("installed");
+      expect(updated.manifest?.settings).toEqual({
+        pathfindingMode: "quality",
+        textureMode: mode
+      });
+      expect(updated.manifest?.index.backupPath).toBe(backupPath);
+      expect(
+        await readFile(join(fixture.appRoot, "index.html"), "utf8")
+      ).toContain(`"rendering":{"textureMode":"${mode}"}`);
+    }
+
+    const automatic = await updateConfiguration(fixture.appRoot, {
+      pathfindingMode: "fast",
+      textureMode: "auto"
+    });
+    expect(automatic.manifest?.settings).toEqual({
+      pathfindingMode: "fast",
+      textureMode: "auto"
+    });
+    const automaticIndex = await readFile(
+      join(fixture.appRoot, "index.html"),
+      "utf8"
+    );
+    expect(automaticIndex).not.toContain('"rendering"');
+    expect(automaticIndex).toContain('"pathfindingMode":"fast"');
+    await expect(
+      stat(join(fixture.appRoot, ".kd-hybrid", "pending-installation.json"))
+    ).rejects.toThrow();
+    const pendingPath = join(
+      fixture.appRoot,
+      ".kd-hybrid",
+      "pending-installation.json"
+    );
+    await writeFile(pendingPath, "{}");
+    expect(await status(fixture.appRoot)).toMatchObject({
+      state: "modified",
+      problems: ["pending installation manifest exists"]
+    });
+    await rm(pendingPath);
+
+    await uninstall(fixture.appRoot);
+    expect(await readFile(join(fixture.appRoot, "index.html"))).toEqual(original);
+    expect(await readFile(fixture.saveSentinel, "utf8")).toBe("do-not-touch");
   });
 });
 

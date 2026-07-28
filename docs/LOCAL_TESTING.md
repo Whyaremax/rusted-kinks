@@ -47,7 +47,36 @@ instead of `%APPDATA%\Kinky Dungeon`.
 Setup installs the signature-gated early bootstrap into the copied
 `resources/app` directory. The patcher must recognize game version 5.4.92,
 Electron package version 5.1.12, and the exact `out/main.js` hash. Unknown or
-modified bundles are refused.
+modified bundles are refused. On that exact bundle it also applies the accepted
+nearest-player, helpless-check, and buff-event source optimizations, after
+saving the original bundle beside the `index.html` backup. Uninstall restores
+both exact byte streams.
+
+After setup, `test:local:status` should report:
+
+- `userDataIsolated: true`;
+- `bundleMatchesManifest: true`;
+- `sourcePatchActive: true`; and
+- `liveAndTestBundleMatch: false`.
+
+The last value is expected while the source patch is active: the isolated
+bundle differs from the untouched live game by the known patched hash. The
+manifest comparison is the integrity check that must remain true.
+
+The TypeScript patcher CLI can also select the startup texture mode without
+editing KD's saved toggle:
+
+```powershell
+node packages/tools/dist/patcher-cli.js configure `
+  --app-root "D:\KD-Hybrid-Test\resources\app" `
+  --texture-mode mobile
+```
+
+The accepted values are `auto`, `original`, `full`, and `mobile`. `auto`
+selects the official mobile atlas for the balanced tier; `original` respects
+KD's stored choice. The explicit modes are useful for matched A/B captures.
+Close the isolated game before configuring it. The change is atomic and
+`uninstall` still restores the original `index.html` and `out/main.js`.
 
 The isolated copy also loads `index.html?test=kd-hybrid`. This activates KD
 5.4.92's built-in developer mode and opens detached renderer DevTools. It is
@@ -62,6 +91,32 @@ KDTestMapGen(10, [0], ["grv"])
 KDTestFullRunthrough(1, false, false)
 KDTestjailer(10)
 ```
+
+The native planner can be changed live without restarting:
+
+```javascript
+KDHybrid.getPathfindingMode()
+KDHybrid.setPathfindingMode("quality")
+KDHybrid.setPathfindingMode("fast")
+KDHybrid.setPathfindingMode("human")
+```
+
+Changing mode clears mode-dependent path caches. The isolated stress test
+exercises every mode and restores `fast` before it exits.
+
+The source patch has independent developer-only A/B switches:
+
+```javascript
+globalThis.KDHybridSourcePatchControl = {
+  disableNearestPlayer: true,
+  disableHelplessFastNegative: true,
+  disableBuffEventIndex: true,
+}
+```
+
+Removing that object or setting a switch to `false` re-enables its optimized
+body. These switches are for isolated profiling only; each path automatically
+falls back when a relevant KD helper has been replaced.
 
 `KDTestMapGen` repeatedly generates maps. `KDTestFullRunthrough` advances
 through floors and validates enemy/checkpoint state; start a disposable test
@@ -89,3 +144,28 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
 
 The test root must be outside the live game tree. Existing nonempty directories
 without a KD Hybrid test-install marker are refused.
+
+For an unmanifested source candidate, use the switch explicitly:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File scripts/local-test-install.ps1 `
+  -Action Launch `
+  -RemoteDebuggingPort 9223 `
+  -AllowUnmanifestedCandidate
+```
+
+If that experiment leaves the patcher in `modified` state, the same switch can
+refresh it:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File scripts/local-test-install.ps1 `
+  -Action Setup `
+  -AllowUnmanifestedCandidate
+```
+
+The recovery path verifies the test marker and exact resolved paths, removes
+only the isolated `resources\app` copy, then reinstalls from the live game. It
+preserves the test tree's `user-data`. Without the switch, setup continues to
+refuse modified installations.

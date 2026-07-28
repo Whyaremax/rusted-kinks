@@ -8,6 +8,7 @@
 
 class QLabel;
 class QLineEdit;
+class QComboBox;
 class QPlainTextEdit;
 class QProgressBar;
 class QPushButton;
@@ -30,6 +31,7 @@ private:
     void setGamePath(const QString& path);
     void refreshStatus();
     void installBootstrap();
+    void applyPathfindingMode();
     void uninstallBootstrap();
     void runOperation(const QString& label,
                       const std::function<kd::PatcherStatus()>& operation);
@@ -46,6 +48,8 @@ private:
     QPushButton* refreshButton_ = nullptr;
     QPushButton* browseButton_ = nullptr;
     QPushButton* openFolderButton_ = nullptr;
+    QComboBox* pathfindingMode_ = nullptr;
+    QPushButton* applyModeButton_ = nullptr;
     QProgressBar* progress_ = nullptr;
     QPlainTextEdit* log_ = nullptr;
     kd::PatcherStatus status_;

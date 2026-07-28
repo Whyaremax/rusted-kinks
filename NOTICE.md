@@ -18,10 +18,19 @@ not endorsed by the game's authors.
 
 ## Kinky Dungeon attribution
 
-Kinky Dungeon source code is the work of its respective authors and
-contributors and is used under the Mozilla Public License 2.0. KD Hybrid
-preserves that license boundary and does not claim authorship of upstream code
-or behavior adapted into MPL-marked files.
+Kinky Dungeon is by Strait Laced Games LLC and its contributors. The exact
+source revision used for compatibility work is public at
+<https://github.com/Ada18980/KinkiestDungeon>, commit
+`5c96c4c1e67faf136ba2c167ed889a9e29005a18`.
+
+The MPL treatment here follows the license metadata shipped in the inspected
+Electron application and confirmation from a Kinky Dungeon developer. The
+public source repository also carries its own contributor and redistribution
+terms; those upstream terms remain authoritative for upstream code. KD Hybrid
+does not claim authorship of upstream code or behavior adapted into
+MPL-marked files, and it does not re-host the complete upstream source tree.
+The redistributable TypeScript and installed-bundle deltas are small patches under
+`upstream-patches/kd-5.4.92/`.
 
 The Kinky Dungeon game, name, artwork, audio, writing, and other assets are not
 included in this repository and are not licensed by KD Hybrid.
@@ -33,5 +42,5 @@ the game content version. The inspected upstream bundle had SHA-256:
 
 `2d3041a085cbe475a63227ff40709f6d9c1595c77a58545c69edf359a57605a4`
 
-No upstream copyright, patent, warranty, or limitation-of-liability notice may
-be removed from an MPL-covered source file.
+Upstream copyright, patent, warranty, limitation-of-liability, credit, and
+redistribution notices must be preserved where they apply.

@@ -5,6 +5,44 @@ coverage/
 *.tsbuildinfo
 npm-debug.log*
 
+# Agent and local work notes
+AGENTS.md
+**/AGENTS.md
+.codex/
+.agents/
+.agent/
+*.agent.md
+*.handoff.md
+*.summary.md
+/FINAL_*.md
+/*_SUMMARY.md
+/*-summary.md
+scratch/
+tmp/
+temp/
+
+# Local configuration, secrets, and session state
+.env
+.env.*
+!.env.example
+*.token
+*.token.txt
+access-token.txt
+test-results/
+.playwright/
+
+# Logs, profiles, and temporary editor/patch files
+*.log
+*.cpuprofile
+*.heapprofile
+*.trace
+*.trace.json
+*.tmp
+*.temp
+*.bak
+*.orig
+*.rej
+
 # Rust
 target/
 

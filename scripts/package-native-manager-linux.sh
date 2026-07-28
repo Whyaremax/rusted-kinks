@@ -17,16 +17,26 @@ case "$arch" in
   *) echo "unsupported AppImage architecture: $arch" >&2; exit 2 ;;
 esac
 
+case "$appdir" in
+  "$output_dir"/*) ;;
+  *) echo "refusing unsafe AppDir path: $appdir" >&2; exit 1 ;;
+esac
+
 rm -rf -- "$appdir"
 mkdir -p "$appdir/usr/bin" "$appdir/usr/share/applications" \
-  "$appdir/usr/share/icons/hicolor/scalable/apps" "$appdir/usr/share/licenses"
+  "$appdir/usr/share/icons/hicolor/scalable/apps" "$appdir/usr/share/licenses" \
+  "$appdir/usr/share/kd-hybrid/source"
 cp "$build_dir/KDHybridManager" "$appdir/usr/bin/"
 cp "$repo_root/native/manager/assets/kd-hybrid-manager.svg" \
   "$appdir/usr/share/icons/hicolor/scalable/apps/kd-hybrid-manager.svg"
 cp "$repo_root/LICENSE" "$appdir/usr/share/licenses/KD-Hybrid-MIT.txt"
+cp "$repo_root/LICENSES/MPL-2.0.txt" \
+  "$appdir/usr/share/licenses/MPL-2.0.txt"
 cp "$repo_root/NOTICE.md" "$appdir/usr/share/licenses/KD-Hybrid-NOTICE.txt"
 cp "$repo_root/native/manager/THIRD_PARTY.md" \
   "$appdir/usr/share/licenses/THIRD-PARTY.txt"
+cp -R "$repo_root/dist/bootstrap/source/MPL-2.0" \
+  "$appdir/usr/share/kd-hybrid/source/"
 
 cat > "$appdir/usr/share/applications/kd-hybrid-manager.desktop" <<'EOF'
 [Desktop Entry]

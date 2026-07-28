@@ -11,7 +11,10 @@ const modEntryOutput = resolve(modOutput, "KDHybrid.entry.js");
 const legalBanner =
   "/*! KD Hybrid contains MIT and MPL-2.0 files; see NOTICE.txt and LICENSES/. */";
 
-
+await Promise.all([
+  rm(bootstrapOutput, { recursive: true, force: true }),
+  rm(modOutput, { recursive: true, force: true })
+]);
 await mkdir(bootstrapOutput, { recursive: true });
 await mkdir(modOutput, { recursive: true });
 
@@ -76,6 +79,34 @@ const legalFiles = [
   [
     "crates/kd-core/src/pathfinding.rs",
     "source/MPL-2.0/crates/kd-core/src/pathfinding.rs"
+  ],
+  [
+    "packages/tools/src/kd-source-patches.ts",
+    "source/MPL-2.0/packages/tools/src/kd-source-patches.ts"
+  ],
+  [
+    "packages/tools/src/kd-source-patch-v6.ts",
+    "source/MPL-2.0/packages/tools/src/kd-source-patch-v6.ts"
+  ],
+  [
+    "native/manager/src/SourcePatches.h",
+    "source/MPL-2.0/native/manager/src/SourcePatches.h"
+  ],
+  [
+    "native/manager/src/SourcePatches.cpp",
+    "source/MPL-2.0/native/manager/src/SourcePatches.cpp"
+  ],
+  [
+    "upstream-patches/kd-5.4.92/README.md",
+    "source/MPL-2.0/upstream-patches/kd-5.4.92/README.md"
+  ],
+  [
+    "upstream-patches/kd-5.4.92/source-optimizations-v6.patch",
+    "source/MPL-2.0/upstream-patches/kd-5.4.92/source-optimizations-v6.patch"
+  ],
+  [
+    "upstream-patches/kd-5.4.92/bundle-optimizations-v6.patch",
+    "source/MPL-2.0/upstream-patches/kd-5.4.92/bundle-optimizations-v6.patch"
   ]
 ];
 
@@ -91,7 +122,10 @@ for (const destination of [bootstrapOutput, modOutput]) {
       "KD Hybrid source notice",
       "",
       "MPL-covered source files are included under source/MPL-2.0/.",
+      "The small KD 5.4.92 source delta and exact upstream revision are under",
+      "source/MPL-2.0/upstream-patches/kd-5.4.92/.",
       "Full project source: https://github.com/Whyaremax/rusted-kinks",
+      "Upstream KD source: https://github.com/Ada18980/KinkiestDungeon",
       ""
     ].join("\n")
   );
@@ -111,6 +145,15 @@ await writeFile(
         packageVersion: "5.1.12",
         bundleSha256:
           "2d3041a085cbe475a63227ff40709f6d9c1595c77a58545c69edf359a57605a4"
+      },
+      sourcePatch: {
+        id: "kd-5.4.92-source-optimizations-v6",
+        outputBundleSha256:
+          "aa4c09e73de34b1ab6eea5328880049578963c7c3dcbaae07728ca408da59f92",
+        source:
+          "source/MPL-2.0/upstream-patches/kd-5.4.92/source-optimizations-v6.patch",
+        bundlePatch:
+          "source/MPL-2.0/upstream-patches/kd-5.4.92/bundle-optimizations-v6.patch"
       }
     },
     null,

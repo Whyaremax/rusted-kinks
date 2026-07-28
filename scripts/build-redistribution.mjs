@@ -84,9 +84,19 @@ const manifest = {
     bundleSha256:
       "2d3041a085cbe475a63227ff40709f6d9c1595c77a58545c69edf359a57605a4",
   },
-  purpose: "optional early bootstrap patcher",
+  sourcePatch: {
+    id: "kd-5.4.92-source-optimizations-v6",
+    outputBundleSha256:
+      "aa4c09e73de34b1ab6eea5328880049578963c7c3dcbaae07728ca408da59f92",
+    source:
+      "bootstrap/source/MPL-2.0/upstream-patches/kd-5.4.92/source-optimizations-v6.patch",
+    bundlePatch:
+      "bootstrap/source/MPL-2.0/upstream-patches/kd-5.4.92/bundle-optimizations-v6.patch",
+  },
+  purpose: "optional early bootstrap and exact source optimization patcher",
   containsGameAssets: false,
   containsSaveData: false,
+  containsUpstreamSourceTree: false,
   files: await Promise.all(
     distributableFiles.map(async (file) => ({
       path: portablePath(path.relative(kitRoot, file)),

@@ -12,6 +12,8 @@ export interface DiagnosticMod {
   readonly name?: string;
   readonly version?: string;
   readonly capabilities?: readonly string[];
+  readonly systems?: readonly string[];
+  readonly kind?: "javascript" | "wasm";
 }
 
 export interface DiagnosticInput {
@@ -30,8 +32,10 @@ export interface DiagnosticDocument {
   readonly bridge?: unknown;
   readonly mods: readonly {
     readonly id: string;
+    readonly kind: "javascript" | "wasm";
     readonly version: string | null;
     readonly capabilities: readonly string[];
+    readonly systems: readonly string[];
   }[];
   readonly extra?: unknown;
 }
@@ -46,8 +50,10 @@ export function createDiagnosticDocument(
     runtime: scrubDiagnostics(input.runtime),
     mods: (input.mods ?? []).map((mod) => ({
       id: stableHash(`${mod.name ?? "unknown"}\u0000${mod.version ?? ""}`),
+      kind: mod.kind ?? "javascript",
       version: mod.version === undefined ? null : scrubString(mod.version),
-      capabilities: (mod.capabilities ?? []).map(scrubString)
+      capabilities: (mod.capabilities ?? []).map(scrubString),
+      systems: (mod.systems ?? []).map(scrubString)
     }))
   };
   return Object.freeze({

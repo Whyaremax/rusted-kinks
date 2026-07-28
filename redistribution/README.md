@@ -25,10 +25,11 @@ KD-Hybrid-<version>-setup.zip
 SHA256SUMS.txt
 ```
 
-Run `KDHybrid-Patcher.ps1` to install the optional early bootstrap. The
-patcher verifies the game bundle, backs up `index.html`, records hashes, and
-supports status and uninstall operations. Normal mods remain the responsibility
-of the game's existing mod manager.
+Run `KDHybrid-Patcher.ps1` to install the optional early bootstrap and verified
+source optimization. The patcher checks the exact game bundle, backs up
+`index.html` and `out/main.js`, records hashes, and supports status and
+byte-exact uninstall. Normal mods remain the responsibility of the game's
+existing mod manager.
 
 The native C++/Qt replacement lives under `native/manager` and is the preferred
 release interface. This PowerShell kit remains a transparent fallback.

@@ -1,24 +1,28 @@
 import { WasmBatchBridge, type WasmBindings } from "./bridge.js";
 import { ABI_VERSION } from "./codec.js";
-import { exportDiagnosticJson } from "./diagnostics.js";
+import {
+  exportDiagnosticJson,
+  type DiagnosticMod,
+} from "./diagnostics.js";
 import { LegacySystemDispatcher } from "./dispatcher.js";
 import { CapabilityPluginHost } from "./plugins.js";
 import {
   AdaptiveQualityController,
   type QualityEnvironment,
-  type QualityMode
+  type QualityMode,
 } from "./quality.js";
 import type { SignatureCandidate } from "./signatures.js";
 import type {
   HookCallback,
   HookPhase,
   KDHybridPublicApi,
+  PathfindingMode,
   RuntimeCapabilities,
   RuntimeStatus,
   SystemName,
   SystemStatus,
   WasmPluginHandle,
-  WasmPluginManifest
+  WasmPluginManifest,
 } from "./types.js";
 import { KNOWN_UPSTREAM, UPSTREAM_5_4_92_FACADES } from "./upstream.js";
 
@@ -31,6 +35,7 @@ export interface RuntimeOptions {
   readonly upstreamBundleSha256?: string;
   readonly qualityMode?: QualityMode;
   readonly qualityEnvironment?: QualityEnvironment;
+  readonly pathfindingMode?: PathfindingMode;
   readonly mods?: readonly {
     readonly name?: string;
     readonly version?: string;
@@ -43,6 +48,11 @@ export interface NativeAdapterRegistration {
   readonly globalName: string;
   readonly candidates: readonly SignatureCandidate[];
   readonly handler: (...args: unknown[]) => unknown;
+  readonly directOfficialArity?: 19;
+}
+
+export interface KnownAdapterOptions {
+  readonly directOfficialArity?: 19;
 }
 
 const CAPABILITIES: RuntimeCapabilities = Object.freeze({
@@ -51,7 +61,7 @@ const CAPABILITIES: RuntimeCapabilities = Object.freeze({
   adaptiveAssets: true,
   wasmPlugins: true,
   localDiagnostics: true,
-  saveDirectoryAccess: false
+  saveDirectoryAccess: false,
 });
 
 export class KDHybridRuntime {
@@ -63,21 +73,24 @@ export class KDHybridRuntime {
   readonly #registeredGlobals = new Set<string>();
   #initialized = false;
   #api: KDHybridPublicApi | null = null;
+  #pathfindingMode: PathfindingMode;
 
   constructor(options: RuntimeOptions = {}) {
     this.#options = options;
     this.dispatcher = new LegacySystemDispatcher(
-      options.target ?? (globalThis as Record<string, unknown>)
+      options.target ?? (globalThis as Record<string, unknown>),
     );
     this.quality = new AdaptiveQualityController(
       options.qualityEnvironment ?? defaultEnvironment(),
-      options.qualityMode ?? "auto"
+      options.qualityMode ?? "auto",
     );
+    this.#pathfindingMode = options.pathfindingMode ?? "fast";
   }
 
   async initializeNative(
     bindings: WasmBindings,
-    wasmSource: RequestInfo | URL | Response | BufferSource | WebAssembly.Module
+    wasmSource:
+      RequestInfo | URL | Response | BufferSource | WebAssembly.Module,
   ): Promise<void> {
     await this.bridge.initialize(bindings, wasmSource);
     this.#initialized = true;
@@ -85,23 +98,29 @@ export class KDHybridRuntime {
 
   registerAdapter(registration: NativeAdapterRegistration): SystemStatus {
     if (this.#registeredGlobals.has(registration.globalName)) {
-      throw new Error(`Adapter ${registration.globalName} is already registered`);
+      throw new Error(
+        `Adapter ${registration.globalName} is already registered`,
+      );
     }
     this.#registeredGlobals.add(registration.globalName);
     return this.dispatcher.registerSystem({
       system: registration.system,
       globalName: registration.globalName,
       candidates: registration.candidates,
-      native: registration.handler
+      native: registration.handler,
+      ...(registration.directOfficialArity === undefined
+        ? {}
+        : { directOfficialArity: registration.directOfficialArity }),
     });
   }
 
   registerKnownAdapter(
     globalName: string,
-    handler: (...args: unknown[]) => unknown
+    handler: (...args: unknown[]) => unknown,
+    options: KnownAdapterOptions = {},
   ): SystemStatus {
     const facade = UPSTREAM_5_4_92_FACADES.find(
-      (candidate) => candidate.globalName === globalName
+      (candidate) => candidate.globalName === globalName,
     );
     if (facade === undefined) {
       throw new Error(`No known KD facade metadata for ${globalName}`);
@@ -114,7 +133,10 @@ export class KDHybridRuntime {
       system: facade.system,
       globalName,
       candidates: exactBundle ? facade.candidates : [],
-      handler
+      handler,
+      ...(options.directOfficialArity === undefined
+        ? {}
+        : { directOfficialArity: options.directOfficialArity }),
     });
   }
 
@@ -129,25 +151,30 @@ export class KDHybridRuntime {
       status: () => this.status(),
       systemStatus: (system?: SystemName) => {
         const statuses = this.dispatcher.status(system);
-        return system === undefined ? statuses : (statuses[0] ?? missingStatus(system));
+        return system === undefined
+          ? statuses
+          : (statuses[0] ?? missingStatus(system));
       },
       registerHook: (
         system: SystemName,
         phase: HookPhase,
         callback: HookCallback,
-        options?: { id?: string; priority?: number }
+        options?: { id?: string; priority?: number },
       ) => this.dispatcher.registerHook(system, phase, callback, options),
       unregisterHook: (id: string) => this.dispatcher.unregisterHook(id),
       dispatch: (system: SystemName, ...args: unknown[]) =>
         this.dispatcher.dispatch(system, ...args),
       query: (payload: Uint8Array) => this.bridge.query(payload),
+      getPathfindingMode: () => this.#pathfindingMode,
+      setPathfindingMode: (mode: PathfindingMode) =>
+        this.setPathfindingMode(mode),
       enableSystem: (system: SystemName) => this.dispatcher.enable(system),
       disableSystem: (system: SystemName, reason?: string) =>
         this.dispatcher.disable(system, reason),
       registerWasmPlugin: (manifest: WasmPluginManifest, bytes: BufferSource) =>
         this.registerWasmPlugin(manifest, bytes),
       exportDiagnostics: (extra?: Record<string, unknown>) =>
-        this.exportDiagnostics(extra)
+        this.exportDiagnostics(extra),
     });
     globalThis.KDHybrid = api;
     this.#api = api;
@@ -164,24 +191,50 @@ export class KDHybridRuntime {
       upstreamPackageVersion: this.#options.upstreamPackageVersion ?? null,
       upstreamBundleSha256: this.#options.upstreamBundleSha256 ?? null,
       nativeAvailable: !bridge.disabled,
-      systems: this.dispatcher.status()
+      pathfindingMode: this.#pathfindingMode,
+      systems: this.dispatcher.status(),
     });
+  }
+
+  getPathfindingMode(): PathfindingMode {
+    return this.#pathfindingMode;
+  }
+
+  setPathfindingMode(mode: PathfindingMode): PathfindingMode {
+    if (mode !== "quality" && mode !== "fast" && mode !== "human") {
+      throw new RangeError(`Unknown pathfinding mode ${String(mode)}`);
+    }
+    this.#pathfindingMode = mode;
+    return mode;
   }
 
   async registerWasmPlugin(
     manifest: WasmPluginManifest,
-    bytes: BufferSource
+    bytes: BufferSource,
   ): Promise<WasmPluginHandle> {
     return this.plugins.register(manifest, bytes);
   }
 
   exportDiagnostics(extra?: Record<string, unknown>): string {
+    const mods: DiagnosticMod[] = [
+      ...(this.#options.mods ?? []).map((mod) => ({
+        ...mod,
+        kind: "javascript" as const,
+      })),
+      ...this.plugins.manifests().map((manifest) => ({
+        name: manifest.id,
+        version: manifest.version,
+        capabilities: manifest.capabilities,
+        systems: manifest.systems,
+        kind: "wasm" as const,
+      })),
+    ];
     return exportDiagnosticJson({
       runtime: this.status() as unknown as Record<string, unknown>,
       quality: this.quality.status() as unknown as Record<string, unknown>,
       bridge: this.bridge.stats() as unknown as Record<string, unknown>,
-      ...(this.#options.mods === undefined ? {} : { mods: this.#options.mods }),
-      ...(extra === undefined ? {} : { extra })
+      ...(mods.length === 0 ? {} : { mods }),
+      ...(extra === undefined ? {} : { extra }),
     });
   }
 
@@ -203,14 +256,16 @@ function defaultEnvironment(): QualityEnvironment {
       width: 1920,
       height: 1080,
       devicePixelRatio: 1,
-      deviceMemoryGiB: 8
+      deviceMemoryGiB: 8,
     };
   }
-  const navigatorWithMemory = navigator as Navigator & { deviceMemory?: number };
+  const navigatorWithMemory = navigator as Navigator & {
+    deviceMemory?: number;
+  };
   const base: QualityEnvironment = {
     width: window.screen?.width ?? window.innerWidth,
     height: window.screen?.height ?? window.innerHeight,
-    devicePixelRatio: window.devicePixelRatio || 1
+    devicePixelRatio: window.devicePixelRatio || 1,
   };
   return navigatorWithMemory.deviceMemory === undefined
     ? base
@@ -227,6 +282,6 @@ function missingStatus(system: SystemName): SystemStatus {
     nativeCalls: 0,
     fallbackCalls: 0,
     failures: 0,
-    reason: "not-registered"
+    reason: "not-registered",
   });
 }

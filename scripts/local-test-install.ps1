@@ -5,7 +5,8 @@ param(
     [string]$GameRoot,
     [string]$TestRoot,
     [ValidateRange(0, 65535)]
-    [int]$RemoteDebuggingPort = 0
+    [int]$RemoteDebuggingPort = 0,
+    [switch]$AllowUnmanifestedCandidate
 )
 
 $ErrorActionPreference = "Stop"
@@ -122,10 +123,34 @@ function Get-PatcherStatus {
     }
     $node = (Get-Command node.exe -ErrorAction Stop).Source
     $json = & $node $cliPath status --app-root $testAppRoot
-    if ($LASTEXITCODE -ne 0) {
-        throw "Patcher status failed with exit code $LASTEXITCODE"
+    $statusExitCode = $LASTEXITCODE
+    if ($statusExitCode -ne 0 -and $statusExitCode -ne 2) {
+        throw "Patcher status failed with exit code $statusExitCode"
     }
     return ($json | Out-String | ConvertFrom-Json)
+}
+
+function Remove-UnmanifestedCandidateApp {
+    $resolvedTestRoot = [System.IO.Path]::GetFullPath($TestRoot).TrimEnd("\")
+    $resolvedGameRoot = [System.IO.Path]::GetFullPath($GameRoot).TrimEnd("\")
+    $resolvedAppRoot = [System.IO.Path]::GetFullPath($testAppRoot).TrimEnd("\")
+    $expectedAppRoot = [System.IO.Path]::GetFullPath(
+        (Join-Path $resolvedTestRoot "resources\app")
+    ).TrimEnd("\")
+    if ($resolvedTestRoot.Equals($resolvedGameRoot, $comparison)) {
+        throw "Refusing candidate reset because TestRoot equals GameRoot"
+    }
+    if (-not $resolvedAppRoot.Equals($expectedAppRoot, $comparison)) {
+        throw "Refusing candidate reset outside the exact test resources\app directory"
+    }
+    $marker = Get-Content -LiteralPath $markerPath -Raw | ConvertFrom-Json
+    if (-not ([string]$marker.testRoot).Equals($resolvedTestRoot, $comparison)) {
+        throw "Refusing candidate reset because the test marker root does not match"
+    }
+    if (Test-Path -LiteralPath $resolvedAppRoot -PathType Container) {
+        Remove-Item -LiteralPath $resolvedAppRoot -Recurse -Force
+        Write-Output "Removed the unmanifested isolated test app; dedicated user data was preserved."
+    }
 }
 
 function Add-UserDataIsolation {
@@ -216,13 +241,19 @@ function Show-Status {
     $electronText = [System.IO.File]::ReadAllText($electronPath)
     $liveHash = (Get-FileHash -LiteralPath $liveMain -Algorithm SHA256).Hash.ToLowerInvariant()
     $testHash = (Get-FileHash -LiteralPath $testMain -Algorithm SHA256).Hash.ToLowerInvariant()
+    $sourcePatch = $patcher.manifest.sourcePatch
+    $expectedTestHash = if ($sourcePatch -and $sourcePatch.patchedSha256) {
+        [string]$sourcePatch.patchedSha256
+    } else {
+        $liveHash
+    }
     $realSave = Join-Path $env:APPDATA "Kinky Dungeon"
     [ordered]@{
         state = if (
             $patcher.state -eq "installed" -and
             $electronText.Contains($isolationMarker) -and
             $electronText.Contains($developerMarker) -and
-            $liveHash -eq $testHash
+            $expectedTestHash -eq $testHash
         ) { "ready" } else { "invalid" }
         testRoot = $TestRoot
         executable = $testExecutable
@@ -232,6 +263,9 @@ function Show-Status {
         isolationHookPresent = $electronText.Contains($isolationMarker)
         developerTestMode = $electronText.Contains($developerMarker)
         liveAndTestBundleMatch = $liveHash -eq $testHash
+        bundleMatchesManifest = $expectedTestHash -eq $testHash
+        sourcePatchActive = [bool]$sourcePatch
+        sourcePatch = $sourcePatch
         bundleSha256 = $testHash
         patcher = $patcher
     } | ConvertTo-Json -Depth 8
@@ -265,6 +299,11 @@ function Setup-TestInstall {
                 "--app-root",
                 $testAppRoot
             )
+        } elseif (
+            $existingStatus.state -eq "modified" -and
+            $AllowUnmanifestedCandidate
+        ) {
+            Remove-UnmanifestedCandidateApp
         } elseif ($existingStatus.state -ne "not-installed") {
             throw "Refusing to refresh test install in patcher state $($existingStatus.state)"
         }
@@ -313,9 +352,24 @@ function Enable-DeveloperTestInstall {
 }
 
 function Launch-TestInstall {
-    $status = Show-Status | ConvertFrom-Json
-    if ($status.state -ne "ready") {
-        throw "Test installation is not ready; run npm run test:local:setup"
+    if ($AllowUnmanifestedCandidate) {
+        if (-not (Test-Path -LiteralPath $markerPath -PathType Leaf)) {
+            throw "Test installation marker is missing; refusing candidate launch"
+        }
+        $electronPath = Join-Path $testAppRoot "electron.js"
+        if (-not (Test-Path -LiteralPath $electronPath -PathType Leaf)) {
+            throw "Test electron.js is missing; refusing candidate launch"
+        }
+        $electronText = [System.IO.File]::ReadAllText($electronPath)
+        if (-not $electronText.Contains($isolationMarker)) {
+            throw "Test user-data isolation hook is missing; refusing candidate launch"
+        }
+        Write-Output "Launching an unmanifested bundle in the isolated test tree."
+    } else {
+        $status = Show-Status | ConvertFrom-Json
+        if ($status.state -ne "ready") {
+            throw "Test installation is not ready; run npm run test:local:setup"
+        }
     }
     $running = @(Get-Process -Name "KinkyDungeon" -ErrorAction SilentlyContinue | Where-Object {
         $_.Path -and $_.Path.Equals($testExecutable, $comparison)

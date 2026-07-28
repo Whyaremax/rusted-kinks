@@ -78,10 +78,19 @@ $licenseRoot = Join-Path $stageRoot "licenses"
 New-Item -ItemType Directory -Path $licenseRoot -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $repoRoot "LICENSE") `
     -Destination (Join-Path $licenseRoot "KD-Hybrid-MIT.txt")
+Copy-Item -LiteralPath (Join-Path $repoRoot "LICENSES\MPL-2.0.txt") `
+    -Destination (Join-Path $licenseRoot "MPL-2.0.txt")
 Copy-Item -LiteralPath (Join-Path $repoRoot "NOTICE.md") `
     -Destination (Join-Path $licenseRoot "KD-Hybrid-NOTICE.txt")
 Copy-Item -LiteralPath (Join-Path $repoRoot "native\manager\THIRD_PARTY.md") `
     -Destination (Join-Path $licenseRoot "THIRD-PARTY.txt")
+$mplSource = Join-Path $repoRoot "dist\bootstrap\source\MPL-2.0"
+if (-not (Test-Path -LiteralPath $mplSource -PathType Container)) {
+    throw "MPL source payload is missing. Run npm run build first."
+}
+$sourceRoot = Join-Path $stageRoot "source"
+New-Item -ItemType Directory -Path $sourceRoot -Force | Out-Null
+Copy-Item -LiteralPath $mplSource -Destination $sourceRoot -Recurse
 [IO.File]::WriteAllText(
     (Join-Path $licenseRoot "LZMA-SDK-Notice.txt"),
     @"
@@ -92,18 +101,35 @@ Source and current SDK downloads: https://www.7-zip.org/sdk.html
     [Text.UTF8Encoding]::new($false)
 )
 
+$expectedQtLicenseHash =
+    "e3a994d82e644b03a792a930f574002658412f62407f5fee083f2555c5f23118"
 $qtRoot = Split-Path -Parent (Split-Path -Parent $windeployqt.Source)
 $qtLicense = Get-ChildItem -LiteralPath $qtRoot -Recurse -File -ErrorAction SilentlyContinue |
     Where-Object { $_.Name -match '^LGPL-3.*\.txt$' } |
     Select-Object -First 1
+if (-not $qtLicense) {
+    $qtLicense = @(
+        (Join-Path $repoRoot ".local\LGPL-3.0.txt"),
+        (Join-Path $outputRoot "LGPL-3.0.txt")
+    ) |
+        Where-Object {
+            if (-not (Test-Path -LiteralPath $_ -PathType Leaf)) {
+                return $false
+            }
+            $cachedHash = (
+                Get-FileHash -LiteralPath $_ -Algorithm SHA256
+            ).Hash.ToLowerInvariant()
+            return $cachedHash -eq $expectedQtLicenseHash
+        } |
+        ForEach-Object { Get-Item -LiteralPath $_ } |
+        Select-Object -First 1
+}
 if (-not $qtLicense) {
     $qtLicenseDownload = Join-Path $outputRoot "LGPL-3.0.txt"
     Invoke-WebRequest -Uri "https://www.gnu.org/licenses/lgpl-3.0.txt" `
         -OutFile $qtLicenseDownload
     $qtLicense = Get-Item -LiteralPath $qtLicenseDownload
 }
-$expectedQtLicenseHash =
-    "e3a994d82e644b03a792a930f574002658412f62407f5fee083f2555c5f23118"
 $actualQtLicenseHash =
     (Get-FileHash -LiteralPath $qtLicense.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($actualQtLicenseHash -ne $expectedQtLicenseHash) {
@@ -158,6 +184,14 @@ if (-not $manifestTool) {
 if (-not $manifestTool) {
     throw "Windows Manifest Tool (mt.exe) is required to mark the SFX asInvoker"
 }
+$manifestToolPath = $manifestTool.Source
+if (-not $manifestToolPath) {
+    $manifestToolPath = $manifestTool.FullName
+}
+if (-not $manifestToolPath -or
+    -not (Test-Path -LiteralPath $manifestToolPath -PathType Leaf)) {
+    throw "Windows Manifest Tool path could not be resolved"
+}
 $applicationManifest = Join-Path $outputRoot "windows-sfx.manifest"
 [IO.File]::WriteAllText(
     $applicationManifest,
@@ -177,7 +211,7 @@ $applicationManifest = Join-Path $outputRoot "windows-sfx.manifest"
 )
 $patchedSfxModule = Join-Path $outputRoot "windows-sfx-as-invoker.sfx"
 Copy-Item -LiteralPath $sfxModulePath -Destination $patchedSfxModule -Force
-& $manifestTool.FullName -nologo -manifest $applicationManifest `
+& $manifestToolPath -nologo -manifest $applicationManifest `
     "-outputresource:$patchedSfxModule;#1"
 if ($LASTEXITCODE -ne 0) {
     throw "mt.exe failed with exit code $LASTEXITCODE"

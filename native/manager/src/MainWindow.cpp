@@ -2,6 +2,7 @@
 
 #include <QApplication>
 #include <QBoxLayout>
+#include <QComboBox>
 #include <QDesktopServices>
 #include <QDir>
 #include <QDragEnterEvent>
@@ -100,6 +101,37 @@ MainWindow::MainWindow(const QString& initialPath, QWidget* parent)
     pathLayout->addLayout(pathRow);
     root->addWidget(pathCard);
 
+    auto* plannerCard = card();
+    auto* plannerLayout = new QVBoxLayout(plannerCard);
+    auto* plannerLabel = new QLabel(QStringLiteral("Pathfinding strategy"));
+    plannerLabel->setObjectName(QStringLiteral("sectionTitle"));
+    auto* plannerDetail = new QLabel(
+        QStringLiteral("Choose maximum route quality, crowd throughput, or "
+                       "more natural-looking NPC movement."));
+    plannerDetail->setObjectName(QStringLiteral("detail"));
+    plannerDetail->setWordWrap(true);
+    auto* plannerRow = new QHBoxLayout;
+    pathfindingMode_ = new QComboBox;
+    pathfindingMode_->addItem(
+        QStringLiteral("Route Quality (lowest map cost)"),
+        QStringLiteral("quality"));
+    pathfindingMode_->addItem(
+        QStringLiteral("Optimized (default)"),
+        QStringLiteral("fast"));
+    pathfindingMode_->addItem(
+        QStringLiteral("Human-like (fewer zigzags)"),
+        QStringLiteral("human"));
+    pathfindingMode_->setCurrentIndex(1);
+    applyModeButton_ = new QPushButton(QStringLiteral("Apply mode"));
+    applyModeButton_->setObjectName(QStringLiteral("secondaryButton"));
+    applyModeButton_->setEnabled(false);
+    plannerRow->addWidget(pathfindingMode_, 1);
+    plannerRow->addWidget(applyModeButton_);
+    plannerLayout->addWidget(plannerLabel);
+    plannerLayout->addWidget(plannerDetail);
+    plannerLayout->addLayout(plannerRow);
+    root->addWidget(plannerCard);
+
     auto* statusCard = card();
     auto* statusLayout = new QVBoxLayout(statusCard);
     auto* statusHeader = new QHBoxLayout;
@@ -141,8 +173,8 @@ MainWindow::MainWindow(const QString& initialPath, QWidget* parent)
     auto* safety = new QLabel(
         QStringLiteral("Safety: the bootstrap is installed only after the "
                        "11 MB upstream bundle matches a known SHA-256. "
-                       "index.html is backed up and every installed file is "
-                       "recorded before changes are committed."));
+                       "index.html and any source-patched bundle are backed up; "
+                       "every installed file is recorded before activation."));
     safety->setObjectName(QStringLiteral("safety"));
     safety->setWordWrap(true);
     root->addWidget(safety);
@@ -279,6 +311,8 @@ MainWindow::MainWindow(const QString& initialPath, QWidget* parent)
             &MainWindow::refreshStatus);
     connect(installButton_, &QPushButton::clicked, this,
             &MainWindow::installBootstrap);
+    connect(applyModeButton_, &QPushButton::clicked, this,
+            &MainWindow::applyPathfindingMode);
     connect(uninstallButton_, &QPushButton::clicked, this,
             &MainWindow::uninstallBootstrap);
     connect(openFolderButton_, &QPushButton::clicked, this, [this] {
@@ -370,14 +404,29 @@ void MainWindow::installBootstrap()
     const auto answer = QMessageBox::question(
         this, QStringLiteral("Install early bootstrap?"),
         QStringLiteral(
-            "KD Hybrid will back up index.html, copy the verified bootstrap "
-            "payload, and record hashes for safe removal.\n\n"
+            "KD Hybrid will back up index.html and out/main.js, apply the "
+            "verified source optimization, copy the bootstrap payload, and "
+            "record hashes for safe removal.\n\n"
             "Game saves and Electron userData are not accessed."));
     if (answer != QMessageBox::Yes) {
         return;
     }
     runOperation(QStringLiteral("Install"), [this] {
-        return kd::Patcher::install(pathEdit_->text().trimmed());
+        return kd::Patcher::install(
+            pathEdit_->text().trimmed(), false,
+            pathfindingMode_->currentData().toString());
+    });
+}
+
+void MainWindow::applyPathfindingMode()
+{
+    if (!hasStatus_ || status_.state != kd::PatcherState::Installed) {
+        return;
+    }
+    runOperation(QStringLiteral("Update pathfinding mode"), [this] {
+        return kd::Patcher::updatePathfindingMode(
+            pathEdit_->text().trimmed(),
+            pathfindingMode_->currentData().toString());
     });
 }
 
@@ -389,8 +438,8 @@ void MainWindow::uninstallBootstrap()
     const auto answer = QMessageBox::question(
         this, QStringLiteral("Uninstall bootstrap?"),
         QStringLiteral(
-            "The exact backed-up index.html will be restored and only "
-            "hash-verified KD Hybrid files will be removed."));
+            "The exact backed-up index.html and out/main.js will be restored, "
+            "and only hash-verified KD Hybrid files will be removed."));
     if (answer != QMessageBox::Yes) {
         return;
     }
@@ -453,8 +502,13 @@ void MainWindow::displayStatus(const kd::PatcherStatus& status)
         detailLabel_->setText(
             status.state == kd::PatcherState::Installed
                 ? QStringLiteral(
-                      "All installed files, index.html, and the upstream "
-                      "bundle match their recorded hashes.")
+                      "Bootstrap and source optimization are installed; all "
+                      "files and backups match their recorded hashes.")
+                : status.inspection.sourcePatched
+                ? QStringLiteral(
+                      "This bundle has the recognized source patch but no "
+                      "installation manifest or original backup. Restore a "
+                      "clean game bundle before installing.")
                 : QStringLiteral(
                       "Ready. No bootstrap installation manifest is active."));
     } else {
@@ -462,8 +516,22 @@ void MainWindow::displayStatus(const kd::PatcherStatus& status)
     }
     installButton_->setEnabled(
         status.state == kd::PatcherState::NotInstalled
-        && status.inspection.knownBundle);
+        && status.inspection.knownBundle
+        && !status.inspection.sourcePatched);
     uninstallButton_->setEnabled(status.state == kd::PatcherState::Installed);
+    applyModeButton_->setEnabled(
+        status.state == kd::PatcherState::Installed);
+    if (status.state == kd::PatcherState::Installed) {
+        const QString mode =
+            status.manifest.value(QStringLiteral("settings"))
+                .toObject()
+                .value(QStringLiteral("pathfindingMode"))
+                .toString(QStringLiteral("fast"));
+        const int index = pathfindingMode_->findData(mode);
+        if (index >= 0) {
+            pathfindingMode_->setCurrentIndex(index);
+        }
+    }
     openFolderButton_->setEnabled(true);
 }
 
@@ -473,6 +541,10 @@ void MainWindow::setBusy(bool busy)
     pathEdit_->setEnabled(!busy);
     browseButton_->setEnabled(!busy);
     refreshButton_->setEnabled(!busy);
+    pathfindingMode_->setEnabled(!busy);
+    applyModeButton_->setEnabled(!busy && hasStatus_
+                                 && status_.state
+                                        == kd::PatcherState::Installed);
     if (busy) {
         installButton_->setEnabled(false);
         uninstallButton_->setEnabled(false);

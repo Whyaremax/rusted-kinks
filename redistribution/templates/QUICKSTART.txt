@@ -16,19 +16,23 @@ Check it later:
 
   .\KDHybrid-Patcher.ps1 -Action Status -GameRoot "C:\Path\To\Kinky Dungeon"
 
-Remove the bootstrap and restore the backed-up index:
+Remove the bootstrap and restore the backed-up game files:
 
   .\KDHybrid-Patcher.ps1 -Action Uninstall -GameRoot "C:\Path\To\Kinky Dungeon"
 
 The patcher refuses unknown game bundles by default. Do not bypass that check
 unless you are developing and have independently verified compatibility.
+The verified KD 5.4.92 source optimization is applied by default. Add
+`-NoSourceOptimizations` to the Install command if you only want the bootstrap.
 
 SAVE SAFETY
 
 The patcher does not access Electron userData or the game's save directory.
-It changes resources/app/index.html and writes its own files
-under resources/app/kd-hybrid. It keeps its backup and installation manifest
-under resources/app/.kd-hybrid.
+It changes resources/app/index.html and, on the exact supported build,
+resources/app/out/main.js. It writes its own files under
+resources/app/kd-hybrid and keeps byte-exact backups plus the installation
+manifest under resources/app/.kd-hybrid. Uninstall verifies and restores both
+original files.
 
 Normal mods are intentionally not managed by this patcher. Install those with
 Kinky Dungeon's existing mod workflow.
@@ -37,4 +41,6 @@ LICENSES
 
 Original KD Hybrid files are MIT licensed. Specifically marked adapted source
 files remain MPL-2.0. Exact licenses, notices, and MPL-covered source accompany
-the corresponding generated payloads.
+the corresponding generated payloads. Kinky Dungeon is credited to Strait
+Laced Games LLC and its contributors. The exact upstream source revision is
+documented in source/MPL-2.0/upstream-patches/kd-5.4.92/.

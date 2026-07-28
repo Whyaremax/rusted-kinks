@@ -28,14 +28,22 @@
     "package": "npm run build && node packages/tools/dist/cli.js package --output artifacts/kd-hybrid.zip",
     "redistribute": "npm run build && node scripts/build-redistribution.mjs",
     "verify:safety": "node scripts/verify-save-safety.mjs",
+    "verify:textures": "node scripts/verify-texture-atlases.mjs",
     "test:local:setup": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/local-test-install.ps1 -Action Setup",
     "test:local:status": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/local-test-install.ps1 -Action Status",
     "test:local:developer": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/local-test-install.ps1 -Action EnableDeveloper",
     "test:local:launch": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/local-test-install.ps1 -Action Launch",
     "test:local:launch:debug": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/local-test-install.ps1 -Action Launch -RemoteDebuggingPort 9223",
     "test:local:pathfinding": "node scripts/stress-live-pathfinding.mjs --port 9223 --enemies 120",
+    "profile:local:turn": "node scripts/profile-live-turn.mjs --port 9223 --enemies 120 --turns 3",
+    "profile:local:mapgen": "node scripts/profile-live-mapgen.mjs --port 9223 --maps 18",
+    "test:mapgen:seeds": "node --test scripts/verify-mapgen-seed-contract.test.mjs",
+    "verify:mapgen:seeds": "node scripts/verify-mapgen-seed-contract.mjs",
     "test:remote": "node scripts/remote-test-server.mjs",
-    "test:remote:smoke": "node scripts/smoke-remote-test-server.mjs"
+    "test:remote:smoke": "node scripts/smoke-remote-test-server.mjs",
+    "test:remote:browser": "node scripts/smoke-remote-browser.mjs",
+    "test:remote:firefox": "node scripts/smoke-remote-firefox.mjs",
+    "test:mod-sdk": "node scripts/test-mod-sdk.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

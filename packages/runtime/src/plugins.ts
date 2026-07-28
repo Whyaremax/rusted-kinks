@@ -1,5 +1,7 @@
 import { ABI_VERSION } from "./codec.js";
+import { SYSTEM_NAMES } from "./types.js";
 import type {
+  SystemName,
   WasmPluginCapability,
   WasmPluginHandle,
   WasmPluginManifest
@@ -13,6 +15,7 @@ const ALLOWED_CAPABILITIES = new Set<WasmPluginCapability>([
   "diagnostics",
   "deterministic-random"
 ]);
+const ALLOWED_SYSTEMS = new Set<SystemName>(SYSTEM_NAMES);
 const ALLOWED_FUNCTION_IMPORTS = new Set([
   "read_state",
   "propose_action",
@@ -59,7 +62,7 @@ export class CapabilityPluginHost {
       throw new RangeError("WASM plugin exceeds 32 MiB");
     }
     const module = await WebAssembly.compile(bytes);
-    validateImports(module, manifest.capabilities);
+    validateImports(module, manifest.capabilities, this.#callbacks);
     const initialPages = Math.min(16, manifest.maxMemoryPages);
     const memory = new WebAssembly.Memory({
       initial: initialPages,
@@ -172,6 +175,20 @@ export function validateManifest(manifest: WasmPluginManifest): void {
   if (!/^[a-z0-9][a-z0-9._-]{1,63}$/u.test(manifest.id)) {
     throw new TypeError("Plugin id must be 2-64 lowercase safe characters");
   }
+  if (
+    typeof manifest.name !== "string" ||
+    manifest.name.trim().length === 0 ||
+    manifest.name.length > 128
+  ) {
+    throw new TypeError("Plugin name must contain 1-128 characters");
+  }
+  if (
+    typeof manifest.version !== "string" ||
+    manifest.version.trim().length === 0 ||
+    manifest.version.length > 64
+  ) {
+    throw new TypeError("Plugin version must contain 1-64 characters");
+  }
   if (manifest.abi !== ABI_VERSION) {
     throw new Error(
       `Plugin manifest ABI ${manifest.abi} does not match host ABI ${ABI_VERSION}`
@@ -195,11 +212,17 @@ export function validateManifest(manifest: WasmPluginManifest): void {
   if (new Set(manifest.systems).size !== manifest.systems.length) {
     throw new TypeError("Plugin systems contain duplicates");
   }
+  for (const system of manifest.systems) {
+    if (!ALLOWED_SYSTEMS.has(system)) {
+      throw new TypeError(`Unknown plugin system ${system}`);
+    }
+  }
 }
 
 function validateImports(
   module: WebAssembly.Module,
-  capabilities: readonly WasmPluginCapability[]
+  capabilities: readonly WasmPluginCapability[],
+  callbacks: PluginHostCallbacks
 ): void {
   const imports = WebAssembly.Module.imports(module);
   const memories = imports.filter((entry) => entry.kind === "memory");
@@ -225,6 +248,28 @@ function validateImports(
     if (required !== null && !capabilities.includes(required)) {
       throw new TypeError(`Import ${entry.name} requires capability ${required}`);
     }
+    if (required !== null && !hasCapabilityCallback(required, callbacks)) {
+      throw new Error(`Host capability ${required} is not available`);
+    }
+  }
+}
+
+function hasCapabilityCallback(
+  capability: WasmPluginCapability,
+  callbacks: PluginHostCallbacks
+): boolean {
+  switch (capability) {
+    case "read-state":
+      return callbacks.readState !== undefined;
+    case "propose-actions":
+      return callbacks.proposeAction !== undefined;
+    case "diagnostics":
+      return callbacks.emitDiagnostic !== undefined;
+    case "deterministic-random":
+      return callbacks.deterministicRandom !== undefined;
+    case "receive-events":
+    case "path-query":
+      return false;
   }
 }
 

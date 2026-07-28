@@ -1,3 +1,5 @@
+import type { PathfindingMode } from "./types.js";
+
 export const ABI_VERSION = 1;
 const UTF8 = new TextEncoder();
 
@@ -103,6 +105,7 @@ export type NativeQuery =
       readonly goal: Position;
       readonly maxVisited: number;
       readonly diagonal: boolean;
+      readonly mode: PathfindingMode;
     }
   | {
       readonly kind: "nearby";
@@ -282,7 +285,7 @@ export function encodeQuery(query: NativeQuery): Uint8Array {
     writer.u32(query.maxVisited);
   } else if (query.kind === "gridPath") {
     writer.u8(3);
-    writer.u8(Number(query.diagonal));
+    writer.u8(Number(query.diagonal) | pathfindingModeFlag(query.mode));
     writer.position(query.start);
     writer.position(query.goal);
     writer.u32(query.maxVisited);
@@ -293,6 +296,19 @@ export function encodeQuery(query: NativeQuery): Uint8Array {
     writer.u16(query.radius);
   }
   return writer.finish();
+}
+
+function pathfindingModeFlag(mode: PathfindingMode): number {
+  switch (mode) {
+    case "fast":
+      return 0;
+    case "quality":
+      return 1 << 1;
+    case "human":
+      return 2 << 1;
+    default:
+      return assertNever(mode);
+  }
 }
 
 export function decodeQueryResponse(bytes: Uint8Array): QueryResponse {

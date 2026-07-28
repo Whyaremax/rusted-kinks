@@ -6,10 +6,20 @@ import { spawn } from "node:child_process";
 
 const args = process.argv.slice(2);
 const marker = args.indexOf("--save-dir");
-if (marker === -1 || args[marker + 1] === undefined) {
-  throw new TypeError("Usage: node scripts/verify-save-safety.mjs --save-dir <directory>");
+const explicitSaveRoot =
+  marker === -1 ? undefined : args[marker + 1];
+const defaultSaveRoot =
+  process.env.KD_SAVE_DIR ??
+  (process.platform === "win32" && process.env.APPDATA
+    ? join(process.env.APPDATA, "Kinky Dungeon")
+    : undefined);
+const requestedSaveRoot = explicitSaveRoot ?? defaultSaveRoot;
+if (requestedSaveRoot === undefined) {
+  throw new TypeError(
+    "Pass --save-dir <directory> or set KD_SAVE_DIR"
+  );
 }
-const saveRoot = resolve(args[marker + 1]);
+const saveRoot = resolve(requestedSaveRoot);
 if ((await stat(saveRoot).catch(() => null))?.isDirectory() !== true) {
   throw new Error(`Save directory does not exist: ${saveRoot}`);
 }

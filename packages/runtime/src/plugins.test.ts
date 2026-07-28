@@ -52,4 +52,29 @@ describe("WASM plugin manifests", () => {
       })
     ).toThrow(/1..1024/u);
   });
+
+  it("rejects incomplete identity metadata and unknown systems", () => {
+    expect(() =>
+      validateManifest({
+        id: "unnamed-plugin",
+        name: " ",
+        version: "1.0.0",
+        abi: 1,
+        capabilities: [],
+        systems: [],
+        maxMemoryPages: 16
+      })
+    ).toThrow(/Plugin name/u);
+    expect(() =>
+      validateManifest({
+        id: "unknown-system",
+        name: "Unknown system",
+        version: "1.0.0",
+        abi: 1,
+        capabilities: [],
+        systems: ["rendering" as "pathfinding"],
+        maxMemoryPages: 16
+      })
+    ).toThrow(/Unknown plugin system rendering/u);
+  });
 });

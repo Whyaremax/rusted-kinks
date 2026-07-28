@@ -1,5 +1,5 @@
 import { createReadStream } from "node:fs";
-import { readFile, readdir, realpath, stat } from "node:fs/promises";
+import { readFile, readdir, realpath, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { networkInterfaces } from "node:os";
 import path from "node:path";
@@ -26,6 +26,7 @@ function parseArguments(argv) {
     testRoot: process.env.KD_REMOTE_TEST_ROOT ?? defaultTestRoot,
     appRoot: process.env.KD_REMOTE_APP_ROOT,
     token: process.env.KD_REMOTE_TOKEN,
+    tokenFile: process.env.KD_REMOTE_TOKEN_FILE,
     noAuth: false,
   };
 
@@ -35,20 +36,28 @@ function parseArguments(argv) {
       options.noAuth = true;
       continue;
     }
+    if (argument === "--lan") {
+      options.host = "0.0.0.0";
+      continue;
+    }
     if (argument === "--help" || argument === "-h") {
       process.stdout.write(`Usage: node scripts/remote-test-server.mjs [options]
 
 Options:
   --host <address>   Address to bind (default: 127.0.0.1)
+  --lan              Listen on every IPv4 interface (same as --host 0.0.0.0)
   --port <number>    TCP port to listen on (default: 8787)
   --test-root <path> Isolated KD test installation
   --app-root <path>  resources/app directory to serve directly
   --token <value>    Reusable access token (otherwise generated at startup)
+  --token-file <path>
+                     Load a reusable token, creating the file if it is missing
   --no-auth          Disable token authentication (private networks only)
   --help             Show this help
 
 Equivalent environment variables: KD_REMOTE_HOST, KD_REMOTE_PORT,
-KD_REMOTE_TEST_ROOT, KD_REMOTE_APP_ROOT, and KD_REMOTE_TOKEN.
+KD_REMOTE_TEST_ROOT, KD_REMOTE_APP_ROOT, KD_REMOTE_TOKEN, and
+KD_REMOTE_TOKEN_FILE.
 `);
       process.exit(0);
     }
@@ -74,6 +83,9 @@ KD_REMOTE_TEST_ROOT, KD_REMOTE_APP_ROOT, and KD_REMOTE_TOKEN.
       case "--token":
         options.token = value;
         break;
+      case "--token-file":
+        options.tokenFile = value;
+        break;
       default:
         fail(`Unknown option: ${argument}`);
     }
@@ -89,7 +101,51 @@ KD_REMOTE_TEST_ROOT, KD_REMOTE_APP_ROOT, and KD_REMOTE_TOKEN.
   if (options.token !== undefined && options.token.length < 16) {
     fail("Access tokens must contain at least 16 characters");
   }
+  if (options.token !== undefined && options.tokenFile !== undefined) {
+    fail("Use either --token or --token-file, not both");
+  }
   return options;
+}
+
+async function loadOrCreateAccessToken(tokenFile) {
+  if (!tokenFile) {
+    return {
+      token: randomBytes(24).toString("base64url"),
+      tokenFile: undefined,
+    };
+  }
+
+  const resolvedTokenFile = path.resolve(tokenFile);
+  let tokenText;
+  try {
+    tokenText = await readFile(resolvedTokenFile, "utf8");
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      fail(`Could not read token file ${resolvedTokenFile}: ${error.message}`);
+    }
+    const generatedToken = randomBytes(24).toString("base64url");
+    try {
+      await writeFile(resolvedTokenFile, `${generatedToken}\n`, {
+        encoding: "utf8",
+        flag: "wx",
+        mode: 0o600,
+      });
+      tokenText = generatedToken;
+    } catch (writeError) {
+      if (writeError.code !== "EEXIST") {
+        fail(
+          `Could not create token file ${resolvedTokenFile}: ${writeError.message}`,
+        );
+      }
+      tokenText = await readFile(resolvedTokenFile, "utf8");
+    }
+  }
+
+  const token = tokenText.trim();
+  if (token.length < 16) {
+    fail(`Token file must contain at least 16 characters: ${resolvedTokenFile}`);
+  }
+  return { token, tokenFile: resolvedTokenFile };
 }
 
 const mimeTypes = new Map([
@@ -195,6 +251,29 @@ function parseRange(header, size) {
   return { start, end: Math.min(end, size - 1) };
 }
 
+function ifRangeAllowsRange(header, entityTag, lastModified) {
+  if (header === undefined) {
+    return true;
+  }
+  if (typeof header !== "string") {
+    return false;
+  }
+  if (header.startsWith('"') || header.startsWith("W/")) {
+    return !entityTag.startsWith("W/") && header === entityTag;
+  }
+  if (!(lastModified instanceof Date)) {
+    return false;
+  }
+  const validatorTime = Date.parse(header);
+  if (!Number.isFinite(validatorTime)) {
+    return false;
+  }
+  return (
+    Math.trunc(lastModified.getTime() / 1000) <=
+    Math.trunc(validatorTime / 1000)
+  );
+}
+
 const browserCacheExtensions = new Set([
   ".css",
   ".csv",
@@ -291,6 +370,10 @@ function cacheClientScript() {
     totalFiles: 0,
     completedBytes: 0,
     totalBytes: 0,
+    resumedFiles: 0,
+    storageQuotaBytes: null,
+    storageUsageBytes: null,
+    storageRequiredBytes: null,
     version: null,
     mode: null,
     error: null
@@ -331,9 +414,13 @@ function cacheClientScript() {
     const percent = state.totalBytes
       ? Math.min(100, Math.round(state.completedBytes / state.totalBytes * 100))
       : 0;
+    const resumed = state.resumedFiles
+      ? " · " + state.resumedFiles + " already saved"
+      : "";
     return "Saving game assets for slow connections: " + percent + "% · " +
       state.completedFiles + "/" + state.totalFiles + " files · " +
-      formatBytes(state.completedBytes) + "/" + formatBytes(state.totalBytes);
+      formatBytes(state.completedBytes) + "/" + formatBytes(state.totalBytes) +
+      resumed;
   }
 
   function updateProgress(file) {
@@ -394,6 +481,10 @@ function cacheClientScript() {
         if (event.data?.type === "progress") {
           state.completedFiles = event.data.completedFiles;
           state.completedBytes = event.data.completedBytes;
+          state.resumedFiles = event.data.resumedFiles || 0;
+          state.storageQuotaBytes = event.data.storageQuotaBytes ?? null;
+          state.storageUsageBytes = event.data.storageUsageBytes ?? null;
+          state.storageRequiredBytes = event.data.storageRequiredBytes ?? null;
           showStatus(progressMessage());
         } else if (event.data?.type === "complete") {
           resolve();
@@ -437,6 +528,10 @@ function cacheClientScript() {
       state.phase = "warming";
       state.completedFiles = 0;
       state.completedBytes = 0;
+      state.resumedFiles = 0;
+      state.storageQuotaBytes = null;
+      state.storageUsageBytes = null;
+      state.storageRequiredBytes = null;
       showStatus(progressMessage());
       if (globalThis.isSecureContext && "serviceWorker" in navigator) {
         await warmWithServiceWorker(manifest);
@@ -526,13 +621,69 @@ self.addEventListener("message", (event) => {
       await Promise.all(oldCaches.map((name) => caches.delete(name)));
       const cache = await caches.open(cacheName);
       const files = event.data.manifest.files;
-      let cursor = 0;
       let completedFiles = 0;
       let completedBytes = 0;
+      let resumedFiles = 0;
+      const pendingFiles = [];
+      for (const file of files) {
+        const cached = await cache.match(file.path);
+        if (cached) {
+          completedFiles += 1;
+          completedBytes += file.bytes;
+          resumedFiles += 1;
+        } else {
+          pendingFiles.push(file);
+        }
+      }
+      const pendingBytes = pendingFiles.reduce(
+        (total, file) => total + file.bytes,
+        0
+      );
+      let storageEstimate = null;
+      try {
+        storageEstimate =
+          await self.navigator?.storage?.estimate?.() ?? null;
+      } catch {
+        // Storage estimates are advisory; unsupported browsers still warm.
+      }
+      const storageQuotaBytes = Number.isFinite(storageEstimate?.quota)
+        ? storageEstimate.quota
+        : null;
+      const storageUsageBytes = Number.isFinite(storageEstimate?.usage)
+        ? storageEstimate.usage
+        : null;
+      const storageReserveBytes = pendingBytes > 0
+        ? Math.max(16 * 1024 * 1024, Math.ceil(pendingBytes * 0.1))
+        : 0;
+      const storageRequiredBytes = pendingBytes + storageReserveBytes;
+      port.postMessage({
+        type: "progress",
+        completedFiles,
+        completedBytes,
+        resumedFiles,
+        storageQuotaBytes,
+        storageUsageBytes,
+        storageRequiredBytes
+      });
+      if (
+        storageQuotaBytes !== null &&
+        storageUsageBytes !== null &&
+        storageQuotaBytes - storageUsageBytes < storageRequiredBytes
+      ) {
+        const missingMiB = (pendingBytes / 1048576).toFixed(1);
+        const availableMiB = (
+          Math.max(storageQuotaBytes - storageUsageBytes, 0) / 1048576
+        ).toFixed(1);
+        throw new Error(
+          "Not enough browser storage to save the remaining assets (" +
+          missingMiB + " MiB needed, " + availableMiB + " MiB available)"
+        );
+      }
+      let cursor = 0;
       const failures = [];
       const workers = Array.from({ length: 4 }, async () => {
-        while (cursor < files.length) {
-          const file = files[cursor++];
+        while (cursor < pendingFiles.length) {
+          const file = pendingFiles[cursor++];
           try {
             const response = await fetch(file.path, {
               cache: "no-cache",
@@ -550,7 +701,11 @@ self.addEventListener("message", (event) => {
           port.postMessage({
             type: "progress",
             completedFiles,
-            completedBytes
+            completedBytes,
+            resumedFiles,
+            storageQuotaBytes,
+            storageUsageBytes,
+            storageRequiredBytes
           });
         }
       });
@@ -631,9 +786,25 @@ async function main() {
     fail(`Test app is not ready at ${requestedAppRoot}: ${error.message}`);
   }
 
-  const authEnabled = !options.noAuth;
-  const accessToken = options.token ?? randomBytes(24).toString("base64url");
   const rootPrefix = `${appRoot}${path.sep}`;
+  const authEnabled = !options.noAuth;
+  const requestedTokenFile = options.tokenFile
+    ? path.resolve(options.tokenFile)
+    : undefined;
+  if (
+    authEnabled &&
+    requestedTokenFile &&
+    (requestedTokenFile === appRoot ||
+      requestedTokenFile.startsWith(rootPrefix))
+  ) {
+    fail("The token file must be outside the served application directory");
+  }
+  const tokenSource = !authEnabled
+    ? { token: "", tokenFile: undefined }
+    : options.token
+      ? { token: options.token, tokenFile: undefined }
+      : await loadOrCreateAccessToken(requestedTokenFile);
+  const accessToken = tokenSource.token;
   const cacheManifest = await buildBrowserCacheManifest(appRoot);
   const cacheManifestBody = Buffer.from(JSON.stringify(cacheManifest));
   const cacheClientBody = Buffer.from(cacheClientScript());
@@ -784,10 +955,19 @@ async function main() {
             )
           : undefined;
       const responseSize = generatedBody?.length ?? fileInfo.size;
-      const range = parseRange(request.headers.range, responseSize);
       const entityTag = generatedBody
         ? `"generated-${cacheManifest.version}"`
         : `W/"${fileInfo.size.toString(16)}-${Math.trunc(fileInfo.mtimeMs).toString(16)}"`;
+      const lastModified = generatedBody ? undefined : fileInfo.mtime;
+      const rangeAllowed = ifRangeAllowsRange(
+        request.headers["if-range"],
+        entityTag,
+        lastModified,
+      );
+      const range =
+        request.headers.range && rangeAllowed
+          ? parseRange(request.headers.range, responseSize)
+          : undefined;
       const headers = {
         "Content-Type": mimeTypes.get(extension) ?? "application/octet-stream",
         "Accept-Ranges": "bytes",
@@ -799,12 +979,15 @@ async function main() {
             ? "no-store"
             : "private, max-age=31536000, immutable",
       };
+      if (lastModified) {
+        headers["Last-Modified"] = lastModified.toUTCString();
+      }
       if (!request.headers.range && request.headers["if-none-match"] === entityTag) {
         response.writeHead(304, headers);
         response.end();
         return;
       }
-      if (request.headers.range && !range) {
+      if (request.headers.range && rangeAllowed && !range) {
         response.writeHead(416, {
           ...headers,
           "Content-Range": `bytes */${responseSize}`,
@@ -855,6 +1038,13 @@ async function main() {
     process.stdout.write(
       `Authentication: ${authEnabled ? "token required" : "disabled"}\n`,
     );
+    if (authEnabled) {
+      process.stdout.write(
+        tokenSource.tokenFile
+          ? `Reusable token file: ${tokenSource.tokenFile}\n`
+          : "Token lifetime: this server process only\n",
+      );
+    }
     process.stdout.write(
       `Browser cache: ${cacheManifest.files.length} files, ${(cacheManifest.totalBytes / 1048576).toFixed(1)} MiB, version ${cacheManifest.version}\n`,
     );

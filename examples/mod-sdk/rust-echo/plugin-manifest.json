@@ -1,0 +1,11 @@
+{
+  "id": "rusted-kinks.echo",
+  "name": "Rusted Kinks echo example",
+  "version": "0.1.0",
+  "abi": 1,
+  "capabilities": [],
+  "systems": [
+    "events"
+  ],
+  "maxMemoryPages": 64
+}

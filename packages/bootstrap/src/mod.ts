@@ -1,10 +1,21 @@
 import {
   KDHybridRuntime,
   type NativeAdapterRegistration,
-  type WasmBindings
+  type WasmBindings,
 } from "@kd-hybrid/runtime";
 
-import { installKinkyDungeonPathfindingAdapter } from "./kd-adapters.js";
+import {
+  hasKDNearestPlayerSourcePatch,
+  installKDCommanderHelpShortcutAdapter,
+  installKDEnemySelectorAdapter,
+  installKDEnemyUpdateCacheAdapter,
+  installKDFindMasterAdapter,
+  installKDJailKeyEarlyReturnAdapter,
+  installKDNearestPlayerAdapter,
+  installKDNearbyEnemiesAdapter,
+  installKinkyDungeonMapGenerationAdapter,
+  installKinkyDungeonPathfindingAdapter,
+} from "./kd-adapters.js";
 
 declare const KDModFiles: Record<string, string>;
 declare const KinkyDungeonRootDirectory: string;
@@ -22,13 +33,19 @@ declare global {
 const detectedVersion = detectVersion();
 const runtime = new KDHybridRuntime({
   qualityMode: globalThis.KDHybridBootstrapConfig?.quality ?? "auto",
-  ...(detectedVersion === undefined ? {} : { upstreamVersion: detectedVersion })
+  pathfindingMode:
+    globalThis.KDHybridBootstrapConfig?.pathfindingMode ?? "fast",
+  ...(detectedVersion === undefined
+    ? {}
+    : { upstreamVersion: detectedVersion }),
 });
 runtime.installGlobal();
 
 void initialize().catch((error: unknown) => {
   runtime.bridge.disable(
-    error instanceof Error ? `mod-initialization:${error.message}` : "mod-initialization-failed"
+    error instanceof Error
+      ? `mod-initialization:${error.message}`
+      : "mod-initialization-failed",
   );
 });
 
@@ -39,17 +56,78 @@ async function initialize(): Promise<void> {
   }
   const bindings: WasmBindings = {
     default: (source) => wasm_bindgen({ module_or_path: String(source) }),
-    HybridEngine: wasm_bindgen.HybridEngine
+    HybridEngine: wasm_bindgen.HybridEngine,
   };
   await runtime.initializeNative(bindings, wasmUrl);
   const externalAdapters = globalThis.KDHybridAdapterPack ?? [];
   if (
-    !externalAdapters.some((adapter) => adapter.globalName === "KinkyDungeonFindPath")
+    !externalAdapters.some(
+      (adapter) => adapter.globalName === "KinkyDungeonCreateMap",
+    )
+  ) {
+    installKinkyDungeonMapGenerationAdapter(runtime);
+  }
+  if (
+    !externalAdapters.some(
+      (adapter) => adapter.globalName === "KinkyDungeonGetEnemy",
+    )
+  ) {
+    installKDEnemySelectorAdapter(runtime);
+  }
+  if (
+    !externalAdapters.some(
+      (adapter) => adapter.globalName === "KinkyDungeonFindPath",
+    )
   ) {
     installKinkyDungeonPathfindingAdapter(runtime);
   }
+  if (
+    !externalAdapters.some(
+      (adapter) => adapter.globalName === "KDNearbyEnemies",
+    )
+  ) {
+    installKDNearbyEnemiesAdapter(runtime);
+  }
+  if (
+    !hasKDNearestPlayerSourcePatch() &&
+    !externalAdapters.some(
+      (adapter) => adapter.globalName === "KDCommanderUpdateRoles",
+    )
+  ) {
+    installKDCommanderHelpShortcutAdapter(runtime);
+  }
+  if (
+    !externalAdapters.some(
+      (adapter) => adapter.globalName === "KinkyDungeonFindMaster",
+    )
+  ) {
+    installKDFindMasterAdapter(runtime);
+  }
+  if (
+    !externalAdapters.some(
+      (adapter) => adapter.globalName === "KinkyDungeonUpdateEnemies",
+    )
+  ) {
+    installKDEnemyUpdateCacheAdapter(runtime);
+  }
+  if (
+    !externalAdapters.some(
+      (adapter) => adapter.globalName === "KinkyDungeonPlaceJailKeys",
+    )
+  ) {
+    installKDJailKeyEarlyReturnAdapter(runtime);
+  }
   for (const adapter of externalAdapters) {
     runtime.registerAdapter(adapter);
+  }
+  if (
+    !externalAdapters.some(
+      (adapter) => adapter.globalName === "KinkyDungeonNearestPlayer",
+    )
+  ) {
+    // Install after external adapters so the handler captures the actual
+    // nearby-enemy facade that KD will call.
+    installKDNearestPlayerAdapter(runtime);
   }
   // Other mods may load after this one. Reconciliation never overwrites their
   // functions; it disables only the conflicting native facade.
@@ -64,7 +142,10 @@ function findModFile(suffix: string): string | null {
       return url;
     }
   }
-  const rooted = `${KinkyDungeonRootDirectory}${normalizedSuffix}`.replaceAll("\\", "/");
+  const rooted = `${KinkyDungeonRootDirectory}${normalizedSuffix}`.replaceAll(
+    "\\",
+    "/",
+  );
   return KDModFiles[rooted] ?? null;
 }
 
@@ -74,7 +155,7 @@ function detectVersion(): string | undefined {
     "KinkyDungeonVersion",
     "KDVersionStr",
     "KDVersion",
-    "KinkyDungeonGameVersion"
+    "KinkyDungeonGameVersion",
   ]) {
     const value = target[name];
     if (typeof value === "string" && /^\d+\.\d+(?:\.\d+)?$/u.test(value)) {
@@ -85,10 +166,7 @@ function detectVersion(): string | undefined {
   if (typeof textGet === "function") {
     try {
       const value = Reflect.apply(textGet, target, ["KDVersionStr"]);
-      if (
-        typeof value === "string" &&
-        /^\d+\.\d+(?:\.\d+)?$/u.test(value)
-      ) {
+      if (typeof value === "string" && /^\d+\.\d+(?:\.\d+)?$/u.test(value)) {
         return value;
       }
     } catch {

@@ -3,7 +3,7 @@ use std::fmt::{Display, Formatter};
 use crate::buffs::{BUFF_TICK_DAMAGE, BUFF_TICK_HEAL, BuffStore};
 use crate::events::{Event, EventKind, EventQueue};
 use crate::model::{ENTITY_DEAD, EntityId, Grid, ModelError, Position, World};
-use crate::pathfinding::{PathResult, find_grid_path, find_path};
+use crate::pathfinding::{GridPathWorkspace, PathResult, find_grid_path_with_workspace, find_path};
 use crate::protocol::{
     Command, CommandBatch, PathStatus, ProtocolError, Query, QueryResponse, Snapshot, StepResponse,
     decode_commands, decode_query, decode_snapshot, encode_query_response, encode_snapshot,
@@ -37,6 +37,7 @@ pub struct Engine {
     events: EventQueue,
     rng: DeterministicRng,
     config: EngineConfig,
+    grid_path_workspace: GridPathWorkspace,
 }
 
 impl Engine {
@@ -58,6 +59,7 @@ impl Engine {
             rng: DeterministicRng::new(seed),
             world,
             config,
+            grid_path_workspace: GridPathWorkspace::default(),
         })
     }
 
@@ -90,6 +92,7 @@ impl Engine {
         self.events = EventQueue::new(self.config.event_capacity);
         self.buffs = buffs;
         self.world = world;
+        self.grid_path_workspace.clear_persistent();
         Ok(())
     }
 
@@ -122,7 +125,7 @@ impl Engine {
         Ok(encode_step_response(&response)?)
     }
 
-    pub fn query_bytes(&self, bytes: &[u8]) -> Result<Vec<u8>, EngineError> {
+    pub fn query_bytes(&mut self, bytes: &[u8]) -> Result<Vec<u8>, EngineError> {
         let response = self.query(decode_query(bytes)?)?;
         Ok(encode_query_response(&response)?)
     }
@@ -164,7 +167,7 @@ impl Engine {
         })
     }
 
-    pub fn query(&self, query: Query) -> Result<QueryResponse, EngineError> {
+    pub fn query(&mut self, query: Query) -> Result<QueryResponse, EngineError> {
         match query {
             Query::Path {
                 entity,
@@ -189,13 +192,16 @@ impl Engine {
                 goal,
                 max_visited,
                 diagonal,
+                mode,
             } => {
-                let result = find_grid_path(
+                let result = find_grid_path_with_workspace(
                     &self.world.grid,
                     start,
                     goal,
                     max_visited.min(1_000_000),
                     diagonal,
+                    mode,
+                    &mut self.grid_path_workspace,
                 );
                 Ok(path_response(result))
             }
@@ -583,7 +589,7 @@ mod tests {
 
     #[test]
     fn query_finds_nearby_entities_and_path() {
-        let engine = fixture();
+        let mut engine = fixture();
         let nearby = engine
             .query(Query::Nearby {
                 origin: Position::new(1, 1),
@@ -612,13 +618,14 @@ mod tests {
 
     #[test]
     fn grid_path_query_does_not_require_an_entity() {
-        let engine = fixture();
+        let mut engine = fixture();
         let path = engine
             .query(Query::GridPath {
                 start: Position::new(0, 0),
                 goal: Position::new(3, 3),
                 max_visited: 100,
                 diagonal: true,
+                mode: crate::pathfinding::PathfindingMode::Fast,
             })
             .expect("grid path");
         assert!(matches!(

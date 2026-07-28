@@ -3,7 +3,14 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { packagePortableMod } from "./packager.js";
-import { install, status, uninstall } from "./patcher.js";
+import {
+  install,
+  status,
+  uninstall,
+  updateConfiguration,
+  type PatcherPathfindingMode,
+  type PatcherTextureMode
+} from "./patcher.js";
 
 const VERSION = "0.1.0";
 
@@ -21,6 +28,23 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         ...(options.has("upstream-version")
           ? { upstreamVersion: required(options, "upstream-version") }
           : {}),
+        ...(options.has("pathfinding-mode")
+          ? {
+              pathfindingMode: requiredPathfindingMode(
+                options,
+                "pathfinding-mode"
+              )
+            }
+          : {}),
+        ...(options.has("texture-mode")
+          ? {
+              textureMode: requiredTextureMode(
+                options,
+                "texture-mode"
+              )
+            }
+          : {}),
+        sourceOptimizations: !options.has("no-source-optimizations"),
         allowUnknownBundle: options.has("allow-unknown")
       });
       print(result);
@@ -35,6 +59,39 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       const result = await uninstall(required(options, "app-root"));
       print(result);
       return result.state === "not-installed" ? 0 : 2;
+    }
+    case "configure": {
+      if (
+        !options.has("pathfinding-mode") &&
+        !options.has("texture-mode")
+      ) {
+        throw new TypeError(
+          "Configure requires --pathfinding-mode and/or --texture-mode"
+        );
+      }
+      const result = await updateConfiguration(
+        required(options, "app-root"),
+        {
+          ...(options.has("pathfinding-mode")
+            ? {
+                pathfindingMode: requiredPathfindingMode(
+                  options,
+                  "pathfinding-mode"
+                )
+              }
+            : {}),
+          ...(options.has("texture-mode")
+            ? {
+                textureMode: requiredTextureMode(
+                  options,
+                  "texture-mode"
+                )
+              }
+            : {})
+        }
+      );
+      print(result);
+      return result.state === "installed" ? 0 : 2;
     }
     case "package": {
       const output = await packagePortableMod({
@@ -64,7 +121,7 @@ function parseOptions(args: readonly string[]): Map<string, string> {
       throw new TypeError(`Unexpected positional argument ${token}`);
     }
     const name = token.slice(2);
-    if (name === "allow-unknown") {
+    if (name === "allow-unknown" || name === "no-source-optimizations") {
       options.set(name, "true");
       continue;
     }
@@ -86,6 +143,37 @@ function required(options: ReadonlyMap<string, string>, name: string): string {
   return value;
 }
 
+function requiredPathfindingMode(
+  options: ReadonlyMap<string, string>,
+  name: string
+): PatcherPathfindingMode {
+  const value = required(options, name);
+  if (value !== "quality" && value !== "fast" && value !== "human") {
+    throw new TypeError(
+      `Option --${name} must be quality, fast, or human`
+    );
+  }
+  return value;
+}
+
+function requiredTextureMode(
+  options: ReadonlyMap<string, string>,
+  name: string
+): PatcherTextureMode {
+  const value = required(options, name);
+  if (
+    value !== "auto" &&
+    value !== "original" &&
+    value !== "full" &&
+    value !== "mobile"
+  ) {
+    throw new TypeError(
+      `Option --${name} must be auto, original, full, or mobile`
+    );
+  }
+  return value;
+}
+
 function print(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
@@ -95,13 +183,15 @@ function help(): string {
 
 Usage:
   kd-hybrid status --app-root <resources/app>
-  kd-hybrid install --app-root <resources/app> [--payload <dir>]
+  kd-hybrid install --app-root <resources/app> [--payload <dir>] [--pathfinding-mode <quality|fast|human>] [--texture-mode <auto|original|full|mobile>] [--no-source-optimizations]
+  kd-hybrid configure --app-root <resources/app> [--pathfinding-mode <quality|fast|human>] [--texture-mode <auto|original|full|mobile>]
   kd-hybrid uninstall --app-root <resources/app>
   kd-hybrid package [--payload <dir>] [--output <zip>]
 
 The patcher never accesses Electron userData or save directories. Unknown game
 bundles are refused unless --allow-unknown is explicit; native systems still
-remain disabled until a unique structural signature matches.
+remain disabled until a unique structural signature matches. Verified source
+patches are hash-gated, backed up, and restored by uninstall.
 `;
 }
 

@@ -4,6 +4,7 @@ use crate::ABI_VERSION;
 use crate::buffs::Buff;
 use crate::events::{Event, EventKind};
 use crate::model::{Entity, EntityId, Position};
+use crate::pathfinding::PathfindingMode;
 
 const SNAPSHOT_MAGIC: [u8; 4] = *b"KDH1";
 const COMMAND_MAGIC: [u8; 4] = *b"KDC1";
@@ -84,6 +85,7 @@ pub enum Query {
         goal: Position,
         max_visited: u32,
         diagonal: bool,
+        mode: PathfindingMode,
     },
     Nearby {
         origin: Position,
@@ -365,9 +367,10 @@ pub fn encode_query(query: Query) -> Vec<u8> {
             goal,
             max_visited,
             diagonal,
+            mode,
         } => {
             writer.u8(3);
-            writer.u8(u8::from(diagonal));
+            writer.u8(u8::from(diagonal) | mode.query_flags());
             writer.position(start);
             writer.position(goal);
             writer.u32(max_visited);
@@ -397,12 +400,20 @@ pub fn decode_query(bytes: &[u8]) -> Result<Query, ProtocolError> {
             origin: reader.position()?,
             radius: reader.u16()?,
         },
-        3 => Query::GridPath {
-            start: reader.position()?,
-            goal: reader.position()?,
-            max_visited: reader.u32()?,
-            diagonal: flags & 1 != 0,
-        },
+        3 => {
+            if flags & !0b111 != 0 {
+                return Err(ProtocolError::InvalidValue("grid path flags"));
+            }
+            let mode = PathfindingMode::from_query_flags(flags)
+                .ok_or(ProtocolError::InvalidValue("pathfinding mode"))?;
+            Query::GridPath {
+                start: reader.position()?,
+                goal: reader.position()?,
+                max_visited: reader.u32()?,
+                diagonal: flags & 1 != 0,
+                mode,
+            }
+        }
         other => return Err(ProtocolError::UnknownTag(other)),
     };
     reader.finish()?;
@@ -792,6 +803,25 @@ mod tests {
         };
         let bytes = encode_commands(&batch).expect("encode");
         assert_eq!(decode_commands(&bytes).expect("decode"), batch);
+    }
+
+    #[test]
+    fn grid_path_modes_round_trip_in_reserved_flags() {
+        for mode in [
+            PathfindingMode::Fast,
+            PathfindingMode::Quality,
+            PathfindingMode::Human,
+        ] {
+            let query = Query::GridPath {
+                start: Position::new(1, 2),
+                goal: Position::new(5, 6),
+                max_visited: 100,
+                diagonal: true,
+                mode,
+            };
+            let bytes = encode_query(query);
+            assert_eq!(decode_query(&bytes).expect("decode"), query);
+        }
     }
 
     #[test]

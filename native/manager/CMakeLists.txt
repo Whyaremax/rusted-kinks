@@ -22,6 +22,13 @@ set(KD_BOOTSTRAP_FILES
     "${KD_BOOTSTRAP_ROOT}/LICENSES/MPL-2.0.txt"
     "${KD_BOOTSTRAP_ROOT}/source/MPL-2.0/crates/kd-core/src/pathfinding.rs"
     "${KD_BOOTSTRAP_ROOT}/source/MPL-2.0/packages/bootstrap/src/kd-adapters.ts"
+    "${KD_BOOTSTRAP_ROOT}/source/MPL-2.0/packages/tools/src/kd-source-patches.ts"
+    "${KD_BOOTSTRAP_ROOT}/source/MPL-2.0/packages/tools/src/kd-source-patch-v6.ts"
+    "${KD_BOOTSTRAP_ROOT}/source/MPL-2.0/native/manager/src/SourcePatches.h"
+    "${KD_BOOTSTRAP_ROOT}/source/MPL-2.0/native/manager/src/SourcePatches.cpp"
+    "${KD_BOOTSTRAP_ROOT}/source/MPL-2.0/upstream-patches/kd-5.4.92/README.md"
+    "${KD_BOOTSTRAP_ROOT}/source/MPL-2.0/upstream-patches/kd-5.4.92/source-optimizations-v6.patch"
+    "${KD_BOOTSTRAP_ROOT}/source/MPL-2.0/upstream-patches/kd-5.4.92/bundle-optimizations-v6.patch"
     "${KD_BOOTSTRAP_ROOT}/wasm/kd_hybrid_core.js"
     "${KD_BOOTSTRAP_ROOT}/wasm/kd_hybrid_core_bg.wasm"
 )
@@ -36,6 +43,8 @@ endforeach()
 add_library(kd_manager_core
     src/Patcher.cpp
     src/Patcher.h
+    src/SourcePatches.cpp
+    src/SourcePatches.h
 )
 target_link_libraries(kd_manager_core PUBLIC Qt6::Core)
 target_compile_definitions(kd_manager_core

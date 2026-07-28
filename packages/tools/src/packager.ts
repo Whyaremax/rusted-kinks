@@ -21,7 +21,14 @@ const REQUIRED_PAYLOAD_FILES = [
   "NOTICE.txt",
   "SOURCE.txt",
   "source/MPL-2.0/packages/bootstrap/src/kd-adapters.ts",
-  "source/MPL-2.0/crates/kd-core/src/pathfinding.rs"
+  "source/MPL-2.0/crates/kd-core/src/pathfinding.rs",
+  "source/MPL-2.0/packages/tools/src/kd-source-patches.ts",
+  "source/MPL-2.0/packages/tools/src/kd-source-patch-v6.ts",
+  "source/MPL-2.0/native/manager/src/SourcePatches.h",
+  "source/MPL-2.0/native/manager/src/SourcePatches.cpp",
+  "source/MPL-2.0/upstream-patches/kd-5.4.92/README.md",
+  "source/MPL-2.0/upstream-patches/kd-5.4.92/source-optimizations-v6.patch",
+  "source/MPL-2.0/upstream-patches/kd-5.4.92/bundle-optimizations-v6.patch"
 ] as const;
 
 

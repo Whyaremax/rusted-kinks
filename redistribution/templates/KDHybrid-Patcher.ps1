@@ -1,8 +1,11 @@
 [CmdletBinding()]
 param(
-    [ValidateSet("Install", "Status", "Uninstall")]
+    [ValidateSet("Install", "Status", "Configure", "Uninstall")]
     [string]$Action = "Status",
-    [string]$GameRoot
+    [string]$GameRoot,
+    [ValidateSet("quality", "fast", "human")]
+    [string]$PathfindingMode = "fast",
+    [switch]$NoSourceOptimizations
 )
 
 $ErrorActionPreference = "Stop"
@@ -67,7 +70,16 @@ if ($Action -eq "Install") {
         "--payload",
         $payload,
         "--upstream-version",
-        "5.4.92"
+        "5.4.92",
+        "--pathfinding-mode",
+        $PathfindingMode,
+        "--source-optimizations",
+        (-not $NoSourceOptimizations).ToString().ToLowerInvariant()
+    )
+} elseif ($Action -eq "Configure") {
+    $arguments += @(
+        "--pathfinding-mode",
+        $PathfindingMode
     )
 }
 

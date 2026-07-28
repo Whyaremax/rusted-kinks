@@ -1,0 +1,964 @@
+diff --git a/Game/src/effect/KinkyDungeonBuffs.ts b/Game/src/effect/KinkyDungeonBuffs.ts
+index 872b3a7..a0d7424 100644
+--- a/Game/src/effect/KinkyDungeonBuffs.ts
++++ b/Game/src/effect/KinkyDungeonBuffs.ts
+@@ -49,8 +49,96 @@ function KDUpdateBuffsOnLoad(): void {
+ 	}
+ }
+ 
++const KDHybridBuffEventActivationThreshold = 2;
++let KDHybridBuffEventTriggers: Set<string> = null;
++let KDHybridBuffEventMapHits = 0;
++let KDHybridBuffEventTick = Number.NaN;
++let KDHybridBuffEventPlayerBuffs: Record<string, KDBuff> = null;
++let KDHybridBuffEventEntities: entity[] = null;
++let KDHybridBuffEventEntityCount = -1;
++let KDHybridCanonicalApplyBuffToEntity: typeof KinkyDungeonApplyBuffToEntity;
++let KDHybridCanonicalApplyBuff: typeof KDApplyBuff;
++
++function KDHybridBuffEventStats(): any {
++	return (globalThis as any).KDHybridSourcePatchControl?.buffEventIndexStats;
++}
++
++function KDHybridInvalidateBuffEventIndex(): void {
++	KDHybridBuffEventTriggers = null;
++	KDHybridBuffEventMapHits = 0;
++	const stats = KDHybridBuffEventStats();
++	if (stats) stats.invalidations = (stats.invalidations || 0) + 1;
++}
++
++(globalThis as any).KDHybridInvalidateBuffEventIndex = KDHybridInvalidateBuffEventIndex;
++
++function KDHybridRefreshBuffEventEpoch(): void {
++	if (KDHybridBuffEventTick !== KinkyDungeonCurrentTick
++		|| KDHybridBuffEventPlayerBuffs !== KinkyDungeonPlayerBuffs
++		|| KDHybridBuffEventEntities !== KDMapData.Entities
++		|| KDHybridBuffEventEntityCount !== KDMapData.Entities.length) {
++		KDHybridBuffEventTriggers = null;
++		KDHybridBuffEventMapHits = 0;
++		KDHybridBuffEventTick = KinkyDungeonCurrentTick;
++		KDHybridBuffEventPlayerBuffs = KinkyDungeonPlayerBuffs;
++		KDHybridBuffEventEntities = KDMapData.Entities;
++		KDHybridBuffEventEntityCount = KDMapData.Entities.length;
++	}
++}
++
++function KDHybridAddBuffEventTriggers(buff: KDBuff): void {
++	if (!KDHybridBuffEventTriggers || !buff?.events) return;
++	for (const event of buff.events) {
++		if (event?.trigger !== undefined)
++			KDHybridBuffEventTriggers.add(event.trigger);
++	}
++}
++
++function KDHybridBuildBuffEventIndex(): void {
++	KDHybridBuffEventTriggers = new Set();
++	for (const buff of Object.values(KinkyDungeonPlayerBuffs || {}))
++		KDHybridAddBuffEventTriggers(buff);
++	for (const entity of KDMapData.Entities) {
++		if (entity.buffs)
++			for (const buff of Object.values(entity.buffs))
++				KDHybridAddBuffEventTriggers(buff);
++	}
++	const stats = KDHybridBuffEventStats();
++	if (stats) {
++		stats.rebuilds = (stats.rebuilds || 0) + 1;
++		stats.indexedTriggers = (stats.indexedTriggers || 0)
++			+ KDHybridBuffEventTriggers.size;
++	}
++}
++
++function KDHybridBuffEventIndexCompatible(control: any): boolean {
++	return !control?.disableBuffEventIndex
++		&& KinkyDungeonApplyBuffToEntity === KDHybridCanonicalApplyBuffToEntity
++		&& KDApplyBuff === KDHybridCanonicalApplyBuff;
++}
++
+ function KinkyDungeonSendBuffEvent(event: string, data: any): void {
+ 	if (!KDMapHasEvent(KDEventMapBuff, event)) return;
++	const sourceControl = (globalThis as any).KDHybridSourcePatchControl;
++	const stats = sourceControl?.buffEventIndexStats;
++	if (stats) stats.calls = (stats.calls || 0) + 1;
++	if (KDHybridBuffEventIndexCompatible(sourceControl)) {
++		KDHybridRefreshBuffEventEpoch();
++		if (!KDHybridBuffEventTriggers) {
++			KDHybridBuffEventMapHits += 1;
++			if (KDHybridBuffEventMapHits >= KDHybridBuffEventActivationThreshold)
++				KDHybridBuildBuffEventIndex();
++			else if (stats)
++				stats.warmupScans = (stats.warmupScans || 0) + 1;
++		}
++		if (KDHybridBuffEventTriggers && !KDHybridBuffEventTriggers.has(event)) {
++			if (stats) stats.negativeSkips = (stats.negativeSkips || 0) + 1;
++			return;
++		}
++	} else if (stats) {
++		stats.dependencyFallbacks = (stats.dependencyFallbacks || 0) + 1;
++	}
++	if (stats) stats.fallbackScans = (stats.fallbackScans || 0) + 1;
+ 	for (let buff of Object.values(KinkyDungeonPlayerBuffs)) {
+ 		if (buff && buff.events) {
+ 			for (let e of buff.events) {
+@@ -449,10 +537,19 @@ function KDApplyBuff(list: Record<string, KDBuff>, origbuff: KDBuff, changes: Re
+ 					KinkyDungeonBlindLevelBase = Math.max(KinkyDungeonBlindLevelBase, 2);
+ 				}
+ 			}
++		if (KDHybridBuffEventTriggers && list[id]?.events?.length) {
++			KDHybridAddBuffEventTriggers(list[id]);
++			const stats = KDHybridBuffEventStats();
++			if (stats) stats.eventfulApplies = (stats.eventfulApplies || 0) + 1;
++		}
+ 		return buff;
+ 	}
+ }
+ 
++KDHybridCanonicalApplyBuffToEntity = KinkyDungeonApplyBuffToEntity;
++KDHybridCanonicalApplyBuff = KDApplyBuff;
++(globalThis as any).KDHybridSourcePatches.buffEventNegativeIndex = "5.4.92-source-v1";
++
+ function KinkyDungeonGetbuff(list: Record<string, KDBuff>, buffId: string): KDBuff {
+ 	if (list && list[buffId]) return list[buffId];
+ 	else return null;
+diff --git a/Game/src/enemy/KinkyDungeonEnemies.ts b/Game/src/enemy/KinkyDungeonEnemies.ts
+index 1e912b1..a59a922 100644
+--- a/Game/src/enemy/KinkyDungeonEnemies.ts
++++ b/Game/src/enemy/KinkyDungeonEnemies.ts
+@@ -268,7 +268,35 @@ function KDGetBindAmp(enemy: entity, override?: number): number {
+  * Bound and unable to do anything
+  * @param enemy
+  */
++const KDHybridHelplessFastNegativeDependencies = {
++	unpackEnemy: KDUnPackEnemy,
++	packEnemy: KDPackEnemy,
++	struggleThreshold: KDNPCStruggleThreshMult,
++};
++
+ function KDHelpless(enemy: entity): boolean {
++	const sourceControl = (globalThis as any).KDHybridSourcePatchControl;
++	const sourceStats = sourceControl?.helplessFastNegativeStats;
++	if (sourceStats)
++		sourceStats.calls = (sourceStats.calls || 0) + 1;
++	const sourceFastPath = !sourceControl?.disableHelplessFastNegative
++		&& KDUnPackEnemy === KDHybridHelplessFastNegativeDependencies.unpackEnemy
++		&& KDPackEnemy === KDHybridHelplessFastNegativeDependencies.packEnemy
++		&& KDNPCStruggleThreshMult === KDHybridHelplessFastNegativeDependencies.struggleThreshold;
++	if (sourceFastPath
++		&& enemy
++		&& !enemy.player
++		&& enemy.Enemy?.maxhp
++		&& enemy.hp > 0.52
++		&& !(enemy.boundLevel > 0)) {
++		if (sourceStats)
++			sourceStats.fastReturns = (sourceStats.fastReturns || 0) + 1;
++		return false;
++	}
++	if (sourceStats) {
++		const key = sourceFastPath ? "officialCalls" : "compatibilityFallbacks";
++		sourceStats[key] = (sourceStats[key] || 0) + 1;
++	}
+ 	let packed = KDUnPackEnemy(enemy);
+ 	let res = enemy && !enemy.player && (enemy.hp <= 0.52 || enemy.boundLevel > KDNPCStruggleThreshMult(enemy) * enemy.Enemy.maxhp) && KDBoundEffects(enemy) > 3;
+ 	if (packed) KDPackEnemy(enemy);
+@@ -356,6 +384,77 @@ function KDEnemyVisionRadius(enemy: entity): number {
+ 	return (data.bonusBefore + data.radius) * data.mult + data.bonusAfter;
+ }
+ 
++const KDHybridNearestPlayerDependencies = {
++	hostile: KDHostile,
++	getFaction: KDGetFaction,
++	helpless: KDHelpless,
++	imprisoned: KDIsImprisoned,
++	unpackEnemy: KDUnPackEnemy,
++	packEnemy: KDPackEnemy,
++	getEnemyByName: KinkyDungeonGetEnemyByName,
++	refreshEnemiesCache: KinkyDungeonRefreshEnemiesCache,
++	struggleThreshold: KDNPCStruggleThreshMult,
++	enemyRank: KDEnemyRank,
++	boundEffects: KDBoundEffects,
++	bindEffectMult: KDGetBindEffectMult,
++	entityHasFlag: KDEntityHasFlag,
++	enemyHasFlag: KDEnemyHasFlag,
++	collectionHasFlag: KDCollHasFlag,
++	factionHostile: KDFactionHostile,
++	factionRelation: KDFactionRelation,
++	inParty: KDIsInParty,
++	isServant: KDIsServant,
++	opinionRepMod: KDOpinionRepMod,
++};
++
++const KDHybridNearestPlayerDefinitions = new WeakMap<entity, object>();
++
++function KDHybridNearestPlayerCompatible(control: any): boolean {
++	return !control?.disableNearestPlayer
++		&& KDHostile === KDHybridNearestPlayerDependencies.hostile
++		&& KDGetFaction === KDHybridNearestPlayerDependencies.getFaction
++		&& KDHelpless === KDHybridNearestPlayerDependencies.helpless
++		&& KDIsImprisoned === KDHybridNearestPlayerDependencies.imprisoned
++		&& KDUnPackEnemy === KDHybridNearestPlayerDependencies.unpackEnemy
++		&& KDPackEnemy === KDHybridNearestPlayerDependencies.packEnemy
++		&& KinkyDungeonGetEnemyByName === KDHybridNearestPlayerDependencies.getEnemyByName
++		&& KinkyDungeonRefreshEnemiesCache === KDHybridNearestPlayerDependencies.refreshEnemiesCache
++		&& KDNPCStruggleThreshMult === KDHybridNearestPlayerDependencies.struggleThreshold
++		&& KDEnemyRank === KDHybridNearestPlayerDependencies.enemyRank
++		&& KDBoundEffects === KDHybridNearestPlayerDependencies.boundEffects
++		&& KDGetBindEffectMult === KDHybridNearestPlayerDependencies.bindEffectMult
++		&& KDEntityHasFlag === KDHybridNearestPlayerDependencies.entityHasFlag
++		&& KDEnemyHasFlag === KDHybridNearestPlayerDependencies.enemyHasFlag
++		&& KDCollHasFlag === KDHybridNearestPlayerDependencies.collectionHasFlag
++		&& KDFactionHostile === KDHybridNearestPlayerDependencies.factionHostile
++		&& KDFactionRelation === KDHybridNearestPlayerDependencies.factionRelation
++		&& KDIsInParty === KDHybridNearestPlayerDependencies.inParty
++		&& KDIsServant === KDHybridNearestPlayerDependencies.isServant
++		&& KDOpinionRepMod === KDHybridNearestPlayerDependencies.opinionRepMod;
++}
++
++function KDHybridCanonicalTargetHostile(subject: entity, candidate: entity, subjectFaction: string): boolean {
++	if (subject.rage > 0) return true;
++	if (candidate.ceasefire > 0) return false;
++
++	const candidateFaction = KDGetFaction(candidate);
++	if (candidateFaction == "Player" && subject.hostile > 0) return true;
++	if (subjectFaction == "Player" && candidate.hostile > 0) return true;
++	if (candidate.rage > 0) return true;
++	if (subjectFaction == "Player" && candidate.allied > 0) return false;
++	if (subjectFaction == "Rage"
++		|| candidateFaction == "Rage"
++		|| (subjectFaction == "Player" && candidateFaction == "Enemy")
++		|| (candidateFaction == "Player" && subjectFaction == "Enemy"))
++		return true;
++	return KDFactionRelation(subjectFaction, candidateFaction) <= -0.5;
++}
++
++const KDHybridSourcePatches = (globalThis as any).KDHybridSourcePatches || {};
++(globalThis as any).KDHybridSourcePatches = KDHybridSourcePatches;
++KDHybridSourcePatches.nearestPlayer = "5.4.92-source-v1";
++KDHybridSourcePatches.helplessFastNegative = "5.4.92-source-v1";
++
+ function KinkyDungeonNearestPlayer(enemy: entity, _requireVision?: boolean, decoy?: boolean, visionRadius?: number, _AI_Data?: KDAIData) {
+ 	if (enemy && enemy.Enemy && !visionRadius) {
+ 		visionRadius = KDEnemyVisionRadius(enemy);
+@@ -369,7 +468,16 @@ function KinkyDungeonNearestPlayer(enemy: entity, _requireVision?: boolean, deco
+ 		if (enemy.Enemy.focusPlayer && KinkyDungeonCheckLOS(enemy, KinkyDungeonPlayerEntity, pdist, visionRadius, false, false) && !KinkyDungeonCheckPath(enemy.x, enemy.y, KinkyDungeonPlayerEntity.x, KinkyDungeonPlayerEntity.y, false, true)) pdist = 1.5;
+ 		let hostile = KDHostile(enemy);
+ 		let nearestDistance = (hostile) ? pdist - 0.1 : 100000;
+-		if (KDGetFaction(enemy) == "Player"
++		const sourceControl = (globalThis as any).KDHybridSourcePatchControl;
++		const sourceFastPath = KDHybridNearestPlayerCompatible(sourceControl);
++		const sourceStats = sourceControl?.nearestPlayerStats;
++		if (sourceStats) {
++			sourceStats.calls = (sourceStats.calls || 0) + 1;
++			const key = sourceFastPath ? "optimizedCalls" : "fallbackCalls";
++			sourceStats[key] = (sourceStats[key] || 0) + 1;
++		}
++		const enemyFaction = sourceFastPath ? KDGetFaction(enemy) : undefined;
++		if ((sourceFastPath ? enemyFaction : KDGetFaction(enemy)) == "Player"
+ 			&& (KDEnemyHasFlag(enemy, "NoFollow")
+ 			|| KDEnemyHasFlag(enemy, "StayHere")))
+ 			nearestDistance = 100000;
+@@ -379,15 +487,47 @@ function KinkyDungeonNearestPlayer(enemy: entity, _requireVision?: boolean, deco
+ 			undefined, true);
+ 			for (let e of ent) {
+ 				if (e == enemy) continue;
+-				if (KDHelpless(e) || KDIsImprisoned(e)) continue;
+-				if (KDGetFaction(e) == "Natural") continue;
+-				if (enemy.Enemy.noTargetSilenced && e.silence > 0) continue;
+-				if ((e.Enemy && !e.Enemy.noAttack && KDHostile(enemy, e))) {
++				if (sourceStats) sourceStats.candidates = (sourceStats.candidates || 0) + 1;
++				let commonFiltersComplete = false;
++				const definition = e.Enemy;
++				let canonicalDefinition = sourceFastPath
++					&& !!definition?.maxhp
++					&& !e.player
++					&& KDHybridNearestPlayerDefinitions.get(e) === definition;
++				if (sourceFastPath
++					&& !canonicalDefinition
++					&& definition?.maxhp
++					&& !e.player
++					&& KinkyDungeonGetEnemyByName((definition.name || definition) as any) === definition) {
++					KDHybridNearestPlayerDefinitions.set(e, definition);
++					canonicalDefinition = true;
++				}
++				if (canonicalDefinition) {
++					if (sourceStats) sourceStats.canonicalCandidates = (sourceStats.canonicalCandidates || 0) + 1;
++					if (definition.noAttack
++						|| !KDHybridCanonicalTargetHostile(enemy, e, enemyFaction))
++						continue;
++					if (KDHelpless(e) || KDIsImprisoned(e)) continue;
++				} else {
++					// Packed, custom, player-like, and dependency-modified entities keep
++					// the exact upstream filter order and helper calls.
++					if (sourceStats) sourceStats.guardedCandidates = (sourceStats.guardedCandidates || 0) + 1;
++					if (KDHelpless(e) || KDIsImprisoned(e)) continue;
++					if (KDGetFaction(e) == "Natural") continue;
++					if (enemy.Enemy.noTargetSilenced && e.silence > 0) continue;
++					commonFiltersComplete = true;
++					if (!definition || definition.noAttack || !KDHostile(enemy, e)) continue;
++				}
++				if (!commonFiltersComplete) {
++					if (KDGetFaction(e) == "Natural") continue;
++					if (enemy.Enemy.noTargetSilenced && e.silence > 0) continue;
++				}
++				{
+ 					if (e.Enemy?.tags?.scenery && KDAllied(enemy) && !KDEnemyHasFlag(e, "targetedForAttack")) continue;
+ 					let dist = Math.sqrt((e.x - enemy.x)*(e.x - enemy.x)
+ 						+ (e.y - enemy.y)*(e.y - enemy.y));
+ 					let pdist_enemy =
+-						(KDGetFaction(enemy) == "Player"
++						((sourceFastPath ? enemyFaction : KDGetFaction(enemy)) == "Player"
+ 						&& !KDEnemyHasFlag(enemy, "NoFollow")
+ 						&& !KDEnemyHasFlag(enemy, "StayHere")
+ 						&& (enemy.Enemy.allied || KDIsInParty(enemy) || (!KDGameData.PrisonerState || KDGameData.PrisonerState == "chase")))
+@@ -11101,4 +11241,4 @@ function KDGetPushTile(Enemy: entity, dx: number, dy: number): KDPoint {
+ 
+ 		}
+ 	}
+-}
+\ No newline at end of file
++}
+diff --git a/Game/src/enemy/KinkyDungeonPathfinding.ts b/Game/src/enemy/KinkyDungeonPathfinding.ts
+index 2092e8c..2a1ca7c 100644
+--- a/Game/src/enemy/KinkyDungeonPathfinding.ts
++++ b/Game/src/enemy/KinkyDungeonPathfinding.ts
+@@ -56,6 +56,130 @@ let KDPathfindingCacheFails = 0;
+ 
+ let KDPFTrim = 40;
+ 
++const KDHybridPathfindingTopCacheDependencies = {
++	map: Map,
++	prototype: Map.prototype,
++	get: Map.prototype.get,
++	has: Map.prototype.has,
++	delete: Map.prototype.delete,
++};
++function KDHybridPathfindingTopCacheCompatible(
++	pathCache: Map<string, KDPoint[]>,
++	sourceControl: any
++): boolean {
++	return !sourceControl?.disablePathfindingTopCacheSingleRead
++		&& Map === KDHybridPathfindingTopCacheDependencies.map
++		&& Map.prototype === KDHybridPathfindingTopCacheDependencies.prototype
++		&& Map.prototype.get === KDHybridPathfindingTopCacheDependencies.get
++		&& Map.prototype.has === KDHybridPathfindingTopCacheDependencies.has
++		&& Map.prototype.delete === KDHybridPathfindingTopCacheDependencies.delete
++		&& pathCache?.get === KDHybridPathfindingTopCacheDependencies.get
++		&& pathCache?.has === KDHybridPathfindingTopCacheDependencies.has
++		&& pathCache?.delete === KDHybridPathfindingTopCacheDependencies.delete;
++}
++
++const KDHybridPathfindingContinuationCacheDependencies = {
++	map: Map,
++	prototype: Map.prototype,
++	get: Map.prototype.get,
++	has: Map.prototype.has,
++	delete: Map.prototype.delete,
++	mapGet: KinkyDungeonMapGet,
++	tilesGet: KinkyDungeonTilesGet,
++};
++function KDHybridPathfindingContinuationCacheCompatible(
++	pathCache: Map<string, KDPoint[]>,
++	sourceControl: any
++): boolean {
++	return !sourceControl?.disablePathfindingContinuationCacheLookup
++		&& Map === KDHybridPathfindingContinuationCacheDependencies.map
++		&& Map.prototype === KDHybridPathfindingContinuationCacheDependencies.prototype
++		&& Map.prototype.get === KDHybridPathfindingContinuationCacheDependencies.get
++		&& Map.prototype.has === KDHybridPathfindingContinuationCacheDependencies.has
++		&& Map.prototype.delete === KDHybridPathfindingContinuationCacheDependencies.delete
++		&& pathCache?.get === KDHybridPathfindingContinuationCacheDependencies.get
++		&& pathCache?.has === KDHybridPathfindingContinuationCacheDependencies.has
++		&& pathCache?.delete === KDHybridPathfindingContinuationCacheDependencies.delete
++		&& KinkyDungeonMapGet === KDHybridPathfindingContinuationCacheDependencies.mapGet
++		&& KinkyDungeonTilesGet === KDHybridPathfindingContinuationCacheDependencies.tilesGet;
++}
++
++const KDHybridPathfindingDeferredTileDependencies = {
++	tilesGet: KinkyDungeonTilesGet,
++	includes: String.prototype.includes,
++};
++function KDHybridPathfindingDeferredTileCompatible(
++	Tiles: string,
++	RequireLight: boolean,
++	sourceControl: any
++): boolean {
++	return !sourceControl?.disablePathfindingDeferredTileMetadata
++		&& (RequireLight === undefined || RequireLight === false)
++		&& typeof Tiles === "string"
++		&& KinkyDungeonTilesGet === KDHybridPathfindingDeferredTileDependencies.tilesGet
++		&& String.prototype.includes === KDHybridPathfindingDeferredTileDependencies.includes;
++}
++
++const KDHybridPathfindingSuccessorDependencies = {
++	map: Map,
++	get: Map.prototype.get,
++	set: Map.prototype.set,
++	forEach: Map.prototype.forEach,
++};
++function KDHybridPathfindingDirectSuccessorsCompatible(sourceControl: any): boolean {
++	return !sourceControl?.disablePathfindingDirectSuccessors
++		&& Map === KDHybridPathfindingSuccessorDependencies.map
++		&& Map.prototype.get === KDHybridPathfindingSuccessorDependencies.get
++		&& Map.prototype.set === KDHybridPathfindingSuccessorDependencies.set
++		&& Map.prototype.forEach === KDHybridPathfindingSuccessorDependencies.forEach;
++}
++(globalThis as any).KDHybridSourcePatches =
++	(globalThis as any).KDHybridSourcePatches || {};
++(globalThis as any).KDHybridSourcePatches.pathfindingDirectSuccessors =
++	"5.4.92-source-v1";
++(globalThis as any).KDHybridSourcePatches.pathfindingClosedFirstSuccessors =
++	"5.4.92-source-v1";
++(globalThis as any).KDHybridSourcePatches.pathfindingTopCacheSingleRead =
++	"5.4.92-source-v1";
++(globalThis as any).KDHybridSourcePatches.pathfindingContinuationCacheLookup =
++	"5.4.92-source-v1";
++(globalThis as any).KDHybridSourcePatches.pathfindingDeferredTileMetadata =
++	"5.4.92-source-v1";
++
++const KDHybridPathfindingOpenValuesIteratorPrototype =
++	Object.getPrototypeOf(new Map().values());
++const KDHybridPathfindingOpenValuesDependencies = {
++	map: Map,
++	forEach: Map.prototype.forEach,
++	values: Map.prototype.values,
++	iteratorNext: KDHybridPathfindingOpenValuesIteratorPrototype.next,
++	iterator: KDHybridPathfindingOpenValuesIteratorPrototype[Symbol.iterator],
++};
++function KDHybridPathfindingOpenValuesCompatible(sourceControl: any): boolean {
++	return !sourceControl?.disablePathfindingOpenValues
++		&& Map === KDHybridPathfindingOpenValuesDependencies.map
++		&& Map.prototype.forEach === KDHybridPathfindingOpenValuesDependencies.forEach
++		&& Map.prototype.values === KDHybridPathfindingOpenValuesDependencies.values
++		&& KDHybridPathfindingOpenValuesIteratorPrototype.next === KDHybridPathfindingOpenValuesDependencies.iteratorNext
++		&& KDHybridPathfindingOpenValuesIteratorPrototype[Symbol.iterator] === KDHybridPathfindingOpenValuesDependencies.iterator;
++}
++(globalThis as any).KDHybridSourcePatches.pathfindingOpenValues =
++	"5.4.92-source-v1";
++
++function KDHybridPathfindingHoistedCacheIndexCompatible(
++	endx: number,
++	endy: number,
++	tileShort: string,
++	sourceControl: any
++): boolean {
++	return !sourceControl?.disablePathfindingHoistedCacheIndex
++		&& typeof endx === "number"
++		&& typeof endy === "number"
++		&& typeof tileShort === "string";
++}
++(globalThis as any).KDHybridSourcePatches.pathfindingHoistedCacheIndex =
++	"5.4.92-source-v1";
++
+ /**
+  * @param startx - the start position
+  * @param starty - the start position
+@@ -102,20 +226,43 @@ function KinkyDungeonFindPath (
+ 	else if (Tiles == KinkyDungeonMovableTilesEnemy) tileShort = "TE";
+ 	else if (Tiles == KinkyDungeonGroundTiles) tileShort = "TG";
+ 	let index = `${startx},${starty},${endx},${endy},${tileShort}`;
++	const sourceControl = (globalThis as any).KDHybridSourcePatchControl;
+ 	if (!blockEnemy && !blockPlayer && !RequireLight && !noDoors && !needDoorMemory) {
+-		if (ignoreLocks) {
+-			if (KDPathCacheIgnoreLocks.has(index)) {
++		const topPathCache = ignoreLocks ? KDPathCacheIgnoreLocks : KDPathCache;
++		const sourceTopCacheSingleRead =
++			KDHybridPathfindingTopCacheCompatible(topPathCache, sourceControl);
++		const sourceTopCacheSingleReadStats =
++			sourceControl?.pathfindingTopCacheSingleReadStats;
++		if (sourceTopCacheSingleReadStats) {
++			sourceTopCacheSingleReadStats.calls =
++				(sourceTopCacheSingleReadStats.calls || 0) + 1;
++			const key = sourceTopCacheSingleRead ? "optimizedCalls" : "fallbackCalls";
++			sourceTopCacheSingleReadStats[key] =
++				(sourceTopCacheSingleReadStats[key] || 0) + 1;
++		}
++		if (sourceTopCacheSingleRead) {
++			const cachedPath = topPathCache.get(index);
++			if (cachedPath !== undefined || topPathCache.has(index)) {
+ 				KDPathfindingCacheHits++;
+-				if (KDPathCacheIgnoreLocks.get(index)[0] && KDistChebyshev(KDPathCacheIgnoreLocks.get(index)[0].x - startx, KDPathCacheIgnoreLocks.get(index)[0].y - starty) < 1.5)
+-					return KDPathCacheIgnoreLocks.get(index).slice(0);
+-				else KDPathCacheIgnoreLocks.delete(index);
++				if (cachedPath[0] && KDistChebyshev(cachedPath[0].x - startx, cachedPath[0].y - starty) < 1.5)
++					return cachedPath.slice(0);
++				else topPathCache.delete(index);
+ 			}
+ 		} else {
+-			if (KDPathCache.has(index)) {
+-				KDPathfindingCacheHits++;
+-				if (KDPathCache.get(index)[0] && KDistChebyshev(KDPathCache.get(index)[0].x - startx, KDPathCache.get(index)[0].y - starty) < 1.5)
+-					return KDPathCache.get(index).slice(0);
+-				else KDPathCache.delete(index);
++			if (ignoreLocks) {
++				if (KDPathCacheIgnoreLocks.has(index)) {
++					KDPathfindingCacheHits++;
++					if (KDPathCacheIgnoreLocks.get(index)[0] && KDistChebyshev(KDPathCacheIgnoreLocks.get(index)[0].x - startx, KDPathCacheIgnoreLocks.get(index)[0].y - starty) < 1.5)
++						return KDPathCacheIgnoreLocks.get(index).slice(0);
++					else KDPathCacheIgnoreLocks.delete(index);
++				}
++			} else {
++				if (KDPathCache.has(index)) {
++					KDPathfindingCacheHits++;
++					if (KDPathCache.get(index)[0] && KDistChebyshev(KDPathCache.get(index)[0].x - startx, KDPathCache.get(index)[0].y - starty) < 1.5)
++						return KDPathCache.get(index).slice(0);
++					else KDPathCache.delete(index);
++				}
+ 			}
+ 		}
+ 
+@@ -124,7 +271,59 @@ function KinkyDungeonFindPath (
+ 	if (KDistChebyshev(startx - endx, starty - endy) < 1.5) {
+ 		return [{x: endx, y: endy}];
+ 	}
+-
++	const sourceDirectSuccessors = KDHybridPathfindingDirectSuccessorsCompatible(sourceControl);
++	const sourceDirectSuccessorStats = sourceControl?.pathfindingDirectSuccessorStats;
++	if (sourceDirectSuccessorStats) {
++		sourceDirectSuccessorStats.calls = (sourceDirectSuccessorStats.calls || 0) + 1;
++		const key = sourceDirectSuccessors ? "optimizedCalls" : "fallbackCalls";
++		sourceDirectSuccessorStats[key] = (sourceDirectSuccessorStats[key] || 0) + 1;
++	}
++	const sourceClosedFirstSuccessors =
++		sourceDirectSuccessors
++		&& !sourceControl?.disablePathfindingClosedFirstSuccessors;
++	const sourceClosedFirstSuccessorStats =
++		sourceControl?.pathfindingClosedFirstSuccessorStats;
++	if (sourceClosedFirstSuccessorStats) {
++		sourceClosedFirstSuccessorStats.calls =
++			(sourceClosedFirstSuccessorStats.calls || 0) + 1;
++		const key = sourceClosedFirstSuccessors ? "optimizedCalls" : "fallbackCalls";
++		sourceClosedFirstSuccessorStats[key] =
++			(sourceClosedFirstSuccessorStats[key] || 0) + 1;
++	}
++	const sourceOpenValues = KDHybridPathfindingOpenValuesCompatible(sourceControl);
++	const sourceOpenValuesStats = sourceControl?.pathfindingOpenValuesStats;
++	if (sourceOpenValuesStats) {
++		sourceOpenValuesStats.calls = (sourceOpenValuesStats.calls || 0) + 1;
++		const key = sourceOpenValues ? "optimizedCalls" : "fallbackCalls";
++		sourceOpenValuesStats[key] = (sourceOpenValuesStats[key] || 0) + 1;
++	}
++	const sourceHoistedCacheIndex =
++		KDHybridPathfindingHoistedCacheIndexCompatible(endx, endy, tileShort, sourceControl);
++	const sourceHoistedCacheIndexStats = sourceControl?.pathfindingHoistedCacheIndexStats;
++	if (sourceHoistedCacheIndexStats) {
++		sourceHoistedCacheIndexStats.calls = (sourceHoistedCacheIndexStats.calls || 0) + 1;
++		const key = sourceHoistedCacheIndex ? "optimizedCalls" : "fallbackCalls";
++		sourceHoistedCacheIndexStats[key] =
++			(sourceHoistedCacheIndexStats[key] || 0) + 1;
++	}
++	const continuationPathCache = ignoreLocks ? KDPathCacheIgnoreLocks : KDPathCache;
++	const sourceContinuationCacheLookup =
++		sourceHoistedCacheIndex
++		&& !blockEnemy
++		&& !blockPlayer
++		&& !RequireLight
++		&& !noDoors
++		&& !needDoorMemory
++		&& KDHybridPathfindingContinuationCacheCompatible(continuationPathCache, sourceControl);
++	const sourceContinuationCacheLookupStats =
++		sourceControl?.pathfindingContinuationCacheLookupStats;
++	if (sourceContinuationCacheLookupStats) {
++		sourceContinuationCacheLookupStats.calls =
++			(sourceContinuationCacheLookupStats.calls || 0) + 1;
++		const key = sourceContinuationCacheLookup ? "optimizedCalls" : "fallbackCalls";
++		sourceContinuationCacheLookupStats[key] =
++			(sourceContinuationCacheLookupStats[key] || 0) + 1;
++	}
+ 	function heuristic(xx: number, yy: number, endxx: number, endyy: number) {
+ 		return 0.1*KDistEuclideanApprox((xx - endxx) * (xx - endxx), (yy - endyy) * (yy - endyy));
+ 	}
+@@ -134,6 +333,17 @@ function KinkyDungeonFindPath (
+ 	// s = source
+ 	let TilesTemp = Tiles;
+ 	if (noDoors) TilesTemp = Tiles.replace("D", "");
++	const sourceDeferredTileMetadata =
++		KDHybridPathfindingDeferredTileCompatible(TilesTemp, RequireLight, sourceControl);
++	const sourceDeferredTileMetadataStats =
++		sourceControl?.pathfindingDeferredTileMetadataStats;
++	if (sourceDeferredTileMetadataStats) {
++		sourceDeferredTileMetadataStats.calls =
++			(sourceDeferredTileMetadataStats.calls || 0) + 1;
++		const key = sourceDeferredTileMetadata ? "optimizedCalls" : "fallbackCalls";
++		sourceDeferredTileMetadataStats[key] =
++			(sourceDeferredTileMetadataStats[key] || 0) + 1;
++	}
+ 	let start: KDPointCostSource = {x: startx, y: starty, g: 0, f: 0, s: ""};
+ 
+ 	// We generate a grid based on map size
+@@ -144,7 +354,7 @@ function KinkyDungeonFindPath (
+ 	let costBonus = 0;
+ 	let MapTile = null;
+ 	let moveCost = 1;
+-	let succ = new Map();
++	let succ: Map<string, KDPointCostSource> = sourceDirectSuccessors ? undefined : new Map();
+ 	let xx = 0;
+ 	let yy = 0;
+ 	let loc = "";
+@@ -161,17 +371,37 @@ function KinkyDungeonFindPath (
+ 		let dx = 0;
+ 		let dy = 0;
+ 		// Get the open tile with the lowest weight
+-		open.forEach(o => {
+-			if (o.f < lc) {
+-				lc = o.f;
+-				lowest_old = lowest;
+-				lowest = o;
++		if (sourceOpenValues) {
++			for (const o of open.values()) {
++				if (o.f < lc) {
++					lc = o.f;
++					lowest_old = lowest;
++					lowest = o;
++				}
+ 			}
+-		});
++		} else {
++			open.forEach(o => {
++				if (o.f < lc) {
++					lc = o.f;
++					lowest_old = lowest;
++					lowest = o;
++				}
++			});
++		}
+ 		if (lowest) {
+ 			let lowLoc = lowest.x + "," + lowest.y;
++			let locIndex = sourceHoistedCacheIndex
++				? `${lowLoc},${endx},${endy},${tileShort}`
++				: "";
++			let continuationCacheHit = false;
++			let continuationCachePath: KDPoint[] = undefined;
++			if (sourceContinuationCacheLookup) {
++				continuationCacheHit = continuationPathCache.has(locIndex);
++				if (continuationCacheHit)
++					continuationCachePath = continuationPathCache.get(locIndex);
++			}
+ 			moveCost = 1;
+-			succ = new Map();
++			if (!sourceDirectSuccessors) succ = new Map();
+ 			// Check bordering tiles on the lowest
+ 			for (let x = -1; x <= 1; x++) {
+ 				for (let y = -1; y <= 1; y++) {
+@@ -180,8 +410,10 @@ function KinkyDungeonFindPath (
+ 						yy = lowest.y + y;
+ 						loc = (xx) + "," + (yy)
+ 						let tile = (xx == endx && yy == endy) ? "" : KinkyDungeonMapGet(xx, yy);
+-						MapTile = KinkyDungeonTilesGet(loc);
+-						let locIndex = `${lowLoc},${endx},${endy},${tileShort}`;
++						if (!sourceDeferredTileMetadata)
++							MapTile = KinkyDungeonTilesGet(loc);
++						if (!sourceHoistedCacheIndex)
++							locIndex = `${lowLoc},${endx},${endy},${tileShort}`;
+ 						// If we have found the end
+ 						if (xx == endx && yy == endy) {
+ 							closed.set(lowLoc, lowest);
+@@ -197,10 +429,18 @@ function KinkyDungeonFindPath (
+ 							if (newPath.length > 0 && TilesTemp.includes(KinkyDungeonMapGet(newPath[0].x, newPath[0].y)))
+ 								return newPath;
+ 							else return undefined;
+-						} else if (!blockEnemy && !blockPlayer && !RequireLight && !noDoors && !needDoorMemory
++						} else if (sourceContinuationCacheLookup
++							? continuationCacheHit
++							: !blockEnemy && !blockPlayer && !RequireLight && !noDoors && !needDoorMemory
+ 								&& ((ignoreLocks && KDPathCacheIgnoreLocks.has(locIndex)) || (!ignoreLocks && KDPathCache.has(locIndex)))) {
+ 							let newPath = [];
+-							if (ignoreLocks) {
++							if (sourceContinuationCacheLookup) {
++								closed.set(lowLoc, lowest);
++								newPath = KinkyDungeonGetPath(closed, lowest.x, lowest.y);
++								let endPath = continuationCachePath.slice(0);
++								KDPathfindingCacheHits++;
++								newPath.push(...endPath);
++							} else if (ignoreLocks) {
+ 								closed.set(lowLoc, lowest);
+ 								newPath = KinkyDungeonGetPath(closed, lowest.x, lowest.y);
+ 								let endPath = KDPathCacheIgnoreLocks.get(locIndex).slice(0);
+@@ -227,10 +467,15 @@ function KinkyDungeonFindPath (
+ 								} else {
+ 									KDPathCache.delete(locIndex);
+ 								}
++								if (sourceContinuationCacheLookup) {
++									continuationCacheHit = false;
++									continuationCachePath = undefined;
++								}
+ 							} else return undefined;
+ 						}
+ 						// Give up and add to the test array
+ 						else if (TilesTemp.includes(tile) && (!RequireLight || KinkyDungeonVisionGet(xx, yy) > 0)
++							&& (!sourceDeferredTileMetadata || ((MapTile = KinkyDungeonTilesGet(loc)), true))
+ 							&& (ignoreLocks || !MapTile || !MapTile.Lock || (Enemy && KDLocks[MapTile.Lock].canNPCPass(xx, yy, MapTile, Enemy)))
+ 							&& (!blockEnemy || (Leashtarget > 0 && Leashtarget == KinkyDungeonEnemyAt(xx, yy)?.leash?.entity) || KinkyDungeonNoEnemyExceptSub(xx, yy, false, Enemy)
+ 								|| (allowPassable && KDCanPassEnemy(KDPlayer(), KinkyDungeonEnemyAt(xx, yy))))
+@@ -267,24 +512,48 @@ function KinkyDungeonFindPath (
+ 									} else costBonus += 0.22;
+ 								}
+ 							}
+-							succ.set(xx + "," + yy, {x: xx, y: yy,
++							const successor = {x: xx, y: yy,
+ 								g: moveCost + costBonus + lowest.g,
+ 								f: moveCost + costBonus + lowest.g + heur(xx, yy, endx, endy),
+-								s: lowLoc});
++								s: lowLoc};
++							if (sourceDirectSuccessors) {
++								const q = xx + "," + yy;
++								if (sourceClosedFirstSuccessors) {
++									const closedSucc = closed.get(q);
++									if (!closedSucc || closedSucc.f > successor.f) {
++										const openSucc = open.get(q);
++										if (!openSucc || openSucc.f > successor.f) {
++											open.set(q, successor);
++										}
++									}
++								} else {
++									const openSucc = open.get(q);
++									if (!openSucc || openSucc.f > successor.f) {
++										const closedSucc = closed.get(q);
++										if (!closedSucc || closedSucc.f > successor.f) {
++											open.set(q, successor);
++										}
++									}
++								}
++							} else {
++								succ.set(xx + "," + yy, successor);
++							}
+ 						}
+ 					}
+ 				}
+ 			}
+-			succ.forEach(s => {
+-				let q = s.x + "," + s.y;
+-				let openSucc = open.get(q);
+-				if (!openSucc || openSucc.f > s.f) {
+-					let closedSucc = closed.get(q);
+-					if (!closedSucc || closedSucc.f > s.f) {
+-						open.set(q, s);
++			if (!sourceDirectSuccessors) {
++				succ.forEach(s => {
++					let q = s.x + "," + s.y;
++					let openSucc = open.get(q);
++					if (!openSucc || openSucc.f > s.f) {
++						let closedSucc = closed.get(q);
++						if (!closedSucc || closedSucc.f > s.f) {
++							open.set(q, s);
++						}
+ 					}
+-				}
+-			});
++				});
++			}
+ 
+ 
+ 			open.delete(lowLoc);
+@@ -323,11 +592,75 @@ function KinkyDungeonGetPath(closed: Map<string, KDPointCostSource>, xx: number,
+  * @param Tiles
+  * @param Finalindex
+  */
++const KDHybridPathCacheDependencies = {
++	slice: Array.prototype.slice,
++};
++function KDHybridPathCacheSingleSliceCompatible(newPath: KDPoint[], sourceControl: any): boolean {
++	return !sourceControl?.disablePathCacheSingleSlice
++		&& Array.isArray(newPath)
++		&& newPath.constructor === Array
++		&& newPath.slice === KDHybridPathCacheDependencies.slice
++		&& Array.prototype.slice === KDHybridPathCacheDependencies.slice;
++}
++function KDHybridPathCacheHoistedKeySuffixCompatible(
++	endx: number,
++	endy: number,
++	Tiles: string,
++	sourceControl: any
++): boolean {
++	return !sourceControl?.disablePathCacheHoistedKeySuffix
++		&& typeof endx === "number"
++		&& typeof endy === "number"
++		&& typeof Tiles === "string";
++}
++(globalThis as any).KDHybridSourcePatches =
++	(globalThis as any).KDHybridSourcePatches || {};
++(globalThis as any).KDHybridSourcePatches.pathCacheSingleSlice =
++	"5.4.92-source-v1";
++(globalThis as any).KDHybridSourcePatches.pathCacheHoistedKeySuffix =
++	"5.4.92-source-v1";
++
+ function KDSetPathfindCache(PathMap: Map<string, KDPoint[]>, newPath: KDPoint[], endx: number, endy: number, Tiles: string, Finalindex: string): void {
+-	for (let i = 0; i < newPath.length - 1; i++) {
+-		let path = newPath.slice(i);
+-		let index = `${path[0].x},${path[0].y},${endx},${endy},${Tiles}`;
+-		PathMap.set(index, path.slice(1));
++	const sourceControl = (globalThis as any).KDHybridSourcePatchControl;
++	const sourceFastPath = KDHybridPathCacheSingleSliceCompatible(newPath, sourceControl);
++	const sourceHoistedKeySuffix = KDHybridPathCacheHoistedKeySuffixCompatible(
++		endx,
++		endy,
++		Tiles,
++		sourceControl
++	);
++	const sourceStats = sourceControl?.pathCacheSingleSliceStats;
++	if (sourceStats) {
++		sourceStats.calls = (sourceStats.calls || 0) + 1;
++		const key = sourceFastPath ? "optimizedCalls" : "fallbackCalls";
++		sourceStats[key] = (sourceStats[key] || 0) + 1;
++	}
++	const keySuffixStats = sourceControl?.pathCacheHoistedKeySuffixStats;
++	if (keySuffixStats) {
++		keySuffixStats.calls = (keySuffixStats.calls || 0) + 1;
++		const key = sourceHoistedKeySuffix ? "optimizedCalls" : "fallbackCalls";
++		keySuffixStats[key] = (keySuffixStats[key] || 0) + 1;
++	}
++	const cacheKeySuffix = sourceHoistedKeySuffix
++		? `,${endx},${endy},${Tiles}`
++		: "";
++	if (sourceFastPath) {
++		for (let i = 0; i < newPath.length - 1; i++) {
++			const point = newPath[i];
++			const suffix = newPath.slice(i + 1);
++			const index = sourceHoistedKeySuffix
++				? `${point.x},${point.y}${cacheKeySuffix}`
++				: `${point.x},${point.y},${endx},${endy},${Tiles}`;
++			PathMap.set(index, suffix);
++		}
++	} else {
++		for (let i = 0; i < newPath.length - 1; i++) {
++			let path = newPath.slice(i);
++			let index = sourceHoistedKeySuffix
++				? `${path[0].x},${path[0].y}${cacheKeySuffix}`
++				: `${path[0].x},${path[0].y},${endx},${endy},${Tiles}`;
++			PathMap.set(index, path.slice(1));
++		}
+ 	}
+ 	if (Finalindex)
+ 		PathMap.set(Finalindex, newPath.slice(0));
+diff --git a/Game/src/restraint/KinkyDungeonRestraints.ts b/Game/src/restraint/KinkyDungeonRestraints.ts
+index 710088a..46ca7d6 100644
+--- a/Game/src/restraint/KinkyDungeonRestraints.ts
++++ b/Game/src/restraint/KinkyDungeonRestraints.ts
+@@ -3444,6 +3444,69 @@ function  KDGeteligrest_gettags(effLevel: number, enemy: KDHasTags, ignoreTags:
+ 	return tags;
+ }
+ 
++const KDHybridEligibleRestraintDefinitions = new WeakMap<object, {
++	enemyTags: object,
++	enemyTagsMult: object | undefined,
++	enemyTagsPrototype: object,
++	enemyTagsMultPrototype: object | undefined,
++}>();
++let KDHybridEligibleRestraintCatalog: restraint[] = undefined;
++function KDHybridEligibleRestraintPlainWeights(weights: object): boolean {
++	if (!weights)
++		return false;
++	const prototype = Object.getPrototypeOf(weights);
++	if (prototype !== Object.prototype && prototype !== null)
++		return false;
++	return Object.values(Object.getOwnPropertyDescriptors(weights)).every((descriptor) =>
++		Object.prototype.hasOwnProperty.call(descriptor, "value")
++		&& typeof descriptor.value === "number");
++}
++function KDHybridInitializeEligibleRestraintDefinitions(): void {
++	if (KDHybridEligibleRestraintCatalog)
++		return;
++	KDHybridEligibleRestraintCatalog = KinkyDungeonRestraints;
++	for (const restraintDefinition of KDHybridEligibleRestraintCatalog) {
++		if (KDHybridEligibleRestraintPlainWeights(restraintDefinition.enemyTags)
++			&& (!restraintDefinition.enemyTagsMult
++				|| KDHybridEligibleRestraintPlainWeights(restraintDefinition.enemyTagsMult)))
++			KDHybridEligibleRestraintDefinitions.set(restraintDefinition, {
++				enemyTags: restraintDefinition.enemyTags,
++				enemyTagsMult: restraintDefinition.enemyTagsMult,
++				enemyTagsPrototype: Object.getPrototypeOf(restraintDefinition.enemyTags),
++				enemyTagsMultPrototype: restraintDefinition.enemyTagsMult
++					? Object.getPrototypeOf(restraintDefinition.enemyTagsMult)
++					: undefined,
++			});
++	}
++}
++const KDHybridEligibleRestraintDependencies = {
++	getTags: KDGeteligrest_gettags,
++	mapGet: Map.prototype.get,
++	mapKeys: Map.prototype.keys,
++	mapHas: Map.prototype.has,
++};
++function KDHybridEligibleRestraintEnemyKeysCompatible(
++	restraintDefinition: restraint,
++	sourceControl: any,
++): boolean {
++	KDHybridInitializeEligibleRestraintDefinitions();
++	const expected = KDHybridEligibleRestraintDefinitions.get(restraintDefinition);
++	return !sourceControl?.disableEligibleRestraintEnemyKeys
++		&& KDGeteligrest_gettags === KDHybridEligibleRestraintDependencies.getTags
++		&& Map.prototype.get === KDHybridEligibleRestraintDependencies.mapGet
++		&& Map.prototype.keys === KDHybridEligibleRestraintDependencies.mapKeys
++		&& Map.prototype.has === KDHybridEligibleRestraintDependencies.mapHas
++		&& expected?.enemyTags === restraintDefinition.enemyTags
++		&& expected?.enemyTagsMult === restraintDefinition.enemyTagsMult
++		&& expected?.enemyTagsPrototype === Object.getPrototypeOf(restraintDefinition.enemyTags)
++		&& (!restraintDefinition.enemyTagsMult
++			|| expected?.enemyTagsMultPrototype === Object.getPrototypeOf(restraintDefinition.enemyTagsMult));
++}
++(globalThis as any).KDHybridSourcePatches =
++	(globalThis as any).KDHybridSourcePatches || {};
++(globalThis as any).KDHybridSourcePatches.eligibleRestraintEnemyKeys =
++	"5.4.92-source-v1";
++
+ 
+ 
+ /**
+@@ -3547,19 +3610,45 @@ function KDGetRestraintsEligible (
+ 				} else {
+ 					let enabled = false;
+ 					let weight = restraint.weight;
+-					for (let t of tags.keys()) {
+-						if (restraint.enemyTags[t] != undefined) {
+-							weight += restraint.enemyTags[t];
+-							enabled = true;
++					const sourceControl = (globalThis as any).KDHybridSourcePatchControl;
++					const sourceStats = sourceControl?.eligibleRestraintEnemyKeyStats;
++					const sourceFastPath = KDHybridEligibleRestraintEnemyKeysCompatible(restraint, sourceControl);
++					if (sourceStats) {
++						sourceStats.restraints = (sourceStats.restraints || 0) + 1;
++						const key = sourceFastPath ? "optimizedRestraints" : "fallbackRestraints";
++						sourceStats[key] = (sourceStats[key] || 0) + 1;
++					}
++					if (sourceFastPath) {
++						for (let t in restraint.enemyTags) {
++							if (tags.has(t)) {
++								weight += restraint.enemyTags[t];
++								enabled = true;
++							}
++						}
++					} else {
++						for (let t of tags.keys()) {
++							if (restraint.enemyTags[t] != undefined) {
++								weight += restraint.enemyTags[t];
++								enabled = true;
++							}
+ 						}
+ 					}
+ 
+-					if (restraint.enemyTagsMult)
+-						for (let t of tags.keys()) {
+-							if (restraint.enemyTagsMult[t] != undefined) {
+-								weight *= restraint.enemyTagsMult[t];
++					if (restraint.enemyTagsMult) {
++						if (sourceFastPath) {
++							for (let t in restraint.enemyTagsMult) {
++								if (tags.has(t)) {
++									weight *= restraint.enemyTagsMult[t];
++								}
++							}
++						} else {
++							for (let t of tags.keys()) {
++								if (restraint.enemyTagsMult[t] != undefined) {
++									weight *= restraint.enemyTagsMult[t];
++								}
+ 							}
+ 						}
++					}
+ 					if (enabled) {
+ 						cache.push({r: restraint, w:weight});
+ 					}
+@@ -7567,4 +7656,4 @@ function KDTest_ListRestraintsWithFeetLinked() {
+ 		}
+ 	}
+ 	console.log(res);
+-}
+\ No newline at end of file
++}
