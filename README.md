@@ -5,7 +5,7 @@ Rusted Kinks, rewrite of Kinky Dungeon by Ada in, well rust. I thought of this w
 The idea is simple: move expensive, repeatable work into Rust/WebAssembly while
 keeping the Electron/Pixi interface, original JavaScript behavior, and modding
 scene intact. Keep the original kink; just make it run better. If Doom can run
-on a pregnancy test, KD can have a Rust fast path.
+on a pregnancy test, then my kinks can be smoother.
 
 It stays hybrid on purpose. The fast path handles work it understands, and the
 original JavaScript takes over when a mod replaces a function, KD updates, or a
