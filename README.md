@@ -19,7 +19,7 @@ testing, and remote-play pipelines are alive. The current source includes the
 accepted pathfinding, crowded-turn, map-generation, texture, and compatibility
 work described below.
 
-What exists today:
+What exists today: (yaps)
 
 - a deterministic Rust core compiled to WebAssembly;
 - a binary protocol, snapshots, spatial indexing, and three pathfinding modes;
