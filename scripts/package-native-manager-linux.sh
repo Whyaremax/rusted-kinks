@@ -74,4 +74,7 @@ mkdir -p "$output_dir"
     --plugin qt \
     --output appimage
 )
-sha256sum "$output_dir/$OUTPUT" > "$output_dir/$OUTPUT.sha256"
+(
+  cd "$output_dir"
+  sha256sum "$OUTPUT" > "$OUTPUT.sha256"
+)
