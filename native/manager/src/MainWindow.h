@@ -31,7 +31,7 @@ private:
     void setGamePath(const QString& path);
     void refreshStatus();
     void installBootstrap();
-    void applyPathfindingMode();
+    void applyConfiguration();
     void uninstallBootstrap();
     void runOperation(const QString& label,
                       const std::function<kd::PatcherStatus()>& operation);
@@ -49,6 +49,7 @@ private:
     QPushButton* browseButton_ = nullptr;
     QPushButton* openFolderButton_ = nullptr;
     QComboBox* pathfindingMode_ = nullptr;
+    QComboBox* textureMode_ = nullptr;
     QPushButton* applyModeButton_ = nullptr;
     QProgressBar* progress_ = nullptr;
     QPlainTextEdit* log_ = nullptr;

@@ -493,6 +493,57 @@ describe("Kinky Dungeon map-generation guard", () => {
     expect(state.depth).toBe(0);
   });
 
+  it("nests compatible-mod translation around the direct pathfinding scope", () => {
+    const state = { depth: 0 };
+    const order: string[] = [];
+    const handler = createKinkyDungeonMapGenerationHandler(
+      () => {
+        order.push("official");
+        expect(state.depth).toBe(1);
+        return "generated";
+      },
+      state,
+      {
+        runWithTranslatedModSourceOptimizations: (callback, record) => {
+          order.push("mod-enter");
+          record?.(true);
+          try {
+            return callback();
+          } finally {
+            order.push("mod-exit");
+          }
+        },
+        recordTranslatedModSourceOptimizations: (active) => {
+          order.push(`mod:${String(active)}`);
+        },
+        runWithDirectPathfindingFallback: (callback, record) => {
+          order.push("path-enter");
+          record?.(true);
+          try {
+            return callback();
+          } finally {
+            order.push("path-exit");
+          }
+        },
+        recordDirectPathfindingFallback: (active) => {
+          order.push(`path:${String(active)}`);
+        },
+      },
+    );
+
+    expect(handler()).toMatchObject({ ok: true, value: "generated" });
+    expect(order).toEqual([
+      "mod-enter",
+      "mod:true",
+      "path-enter",
+      "path:true",
+      "official",
+      "path-exit",
+      "mod-exit",
+    ]);
+    expect(state.depth).toBe(0);
+  });
+
   it("keeps the dispatcher path when the direct fallback control is disabled", () => {
     const state = { depth: 0 };
     const activations: boolean[] = [];

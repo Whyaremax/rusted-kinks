@@ -3541,6 +3541,94 @@ Evidence:
   `mapgen-v67-post-stress-smoke.json`,
   `73BB15A880A8B8A03F397C71C35867C17AFA9702E9543DC5DA09B505C9FC7E95`.
 
+## Accepted local: audited legacy-mod source translation
+
+KD's source fast paths deliberately treat any loaded ZIP as unknown and use
+their original JavaScript branches. That is the right default, but it also
+meant three reviewed mods that do not replace map-generation dependencies
+disabled the affected accepted v49-v67 work.
+
+The bootstrap now hashes selected archives through the official mod-loader
+boundary and issues an immutable compatibility proof only for byte-exact
+profiles. Useful Tooltips 1.33 is read/UI-only for this boundary. Prisoner
+Revaluation 1.14 keeps its guard action, deterministic KD random call, and
+reputation write in JavaScript. Breach Explosives keeps its bullet callback,
+effect tiles, grid write, and light-grid invalidation in JavaScript. During one
+proved official map-generation transaction, only the broad mod-registry guard
+bindings are substituted; the exact original bindings are restored in
+`finally`.
+
+The first fresh-process product/control/product throughput gate used all three
+archives and the canonical 12 seeds:
+
+| Arm | 12-map total | Median | Accessible | Unique |
+| --- | ---: | ---: | ---: | ---: |
+| translated product A | 22,929.7 ms | 1,441.7 ms | 12/12 | 12 |
+| explicit JS fallback control | 95,890.7 ms | 6,900.9 ms | 12/12 | 12 |
+| translated product B | 21,088.1 ms | 1,405.1 ms | 12/12 | 12 |
+
+Both product arms repeated all 12 signatures, 1,749,784 path calls, 13,323
+selector calls, and the exact restore. The control ran 4.36x slower than the
+22,008.9 ms product mean.
+
+That large timing gap exposed a harness limitation: the profiler awaits a
+digest between maps, allowing the live event loop to advance. Three later
+control maps therefore began from different time-driven state and cannot serve
+as a same-input equivalence claim; the control had one additional path call.
+Those three indices were rerun as fresh product/control process pairs:
+
+| Seed index | Product | Control | Speedup | Full map SHA-256 and call parity |
+| ---: | ---: | ---: | ---: | --- |
+| 2 | 2,250.8 ms | 3,984.3 ms | 1.770x | exact |
+| 6 | 505.9 ms | 602.8 ms | 1.192x | exact |
+| 10 | 774.1 ms | 870.2 ms | 1.124x | exact |
+
+The three fresh pairs aggregate to 3,530.8 ms translated versus 5,457.3 ms
+fallback, a 1.546x speedup or 35.3% less wall time. Each pair matched the full
+map-content SHA-256, signature, path-call count, selector-call count,
+accessibility result, and exact restore. Separate Useful-only,
+Prisoner-only, and Breach-only seed-2 pairs were also exact and measured
+1.76x-1.78x.
+
+The real loader gate retained all six ZIP entries and every tested handler:
+Useful Tooltips' tick/config/tooltip registrations, Prisoner Revaluation's
+guard action and assignment wrapper, and Breach Explosives' settings and
+bullet events. Firing the real Breach callback changed a breakable grid cell
+from `1` to `0`, added Smoke and RubbleNoMend effects, marked the light grid
+dirty, and the next path query completed natively with zero fallback or
+failure. Unknown, changed, duplicate, oversized, malformed, spoofed, and
+entry-mismatched proofs remain on JavaScript in focused tests.
+
+Evidence:
+
+- 12-map throughput product/control/product:
+  `mapgen-mod-translator-v1-3mods-{product-a,control,product-b}-12map.json`,
+  `FCBDA4832C2426C4135B2B28F1D855557B7EE10098EFEA6BBA0338D9D18984F4`,
+  `950D2764B7DEE3AF567F15B7EACEBFDE27C69A906AAFD92ED15BD5F67F0AA23D`,
+  and
+  `EEA504A4774F09316637728182381C11FF4009FDECF5EDECB8FC8771B672788A`;
+- fresh seed-2 product/control:
+  `mapgen-mod-translator-v1-combined-seed2-{product,control}-fresh.json`,
+  `3717B13DB5BCB3E9B9CB1243DF6E52CE1B76B7C00083634E7D8C0EC1EFE558EA`
+  and
+  `B0D05E9CE8EB4B1B3B1B1A33F8D7A7B65EF7C726A223F7BA32DD29E8945C00B1`;
+- fresh seed-6 product/control:
+  `mapgen-mod-translator-v1-combined-seed6-{product,control}-fresh.json`,
+  `4C3FE78EE56268711E863FE369AD791B843D2970E9474635EE608788FC55DADD`
+  and
+  `3165D84E5036787CC335BA4E95FA7461A125891AC08397DC67A82DC82A19E992`;
+- fresh seed-10 product/control:
+  `mapgen-mod-translator-v1-combined-seed10-{product,control}-fresh.json`,
+  `FE2339A0E0FCFAA5DA40DAFE4CD40AF1E86FD35AB7CA918274DE32F373A1FAFE`
+  and
+  `073456C8C259213FFB3754B9AD2A0CC0AB44A25C35E480E70912E9F74CB120BF`;
+- official-loader registrations and real Breach mutation:
+  `mod-translator-v1-3mods-live-functional.json`,
+  `64306FBDE475239B4F8AD6BD94394F818A33DB5836C14164EA8203877597A59B`;
+- final rebuilt bootstrap smoke:
+  `mapgen-mod-translator-v1-final-bundle-smoke.json`,
+  `47A56BAD094A2542EE1867250D766CEEC8DF82901B8BD2234F8BCBF32E058E33`.
+
 ## Release packaging: source patch v6
 
 Final release cleanup promotes the accepted v67 bundle into one immutable,
@@ -4341,6 +4429,82 @@ The last command is a texture lifecycle fixture, not an AI-optimization
 acceptance run. With one A/B sample it can exit nonzero on the independent
 master-adapter speed threshold even when its state, texture, and lifecycle
 checks pass; the JSON report records those checks separately.
+
+## Accepted adaptive GPU frame pacing
+
+The first accepted GPU slice reduces redundant scene submissions without
+changing textures, simulation, or Pixi's offscreen rendering. A stage audit
+first ruled out blanket viewport culling: the Intro contained 38 display
+objects and the deterministic crowded room contained 382, with zero objects
+outside the rendered viewport in either scene. KD already avoids constructing
+most offscreen display objects, so another culling layer would add bounds work
+without removing draws.
+
+`packages/bootstrap/src/frame-pacing.ts` instead installs a deadline-based
+stage pacer. It:
+
+- activates only on KD 5.4.92, official `out/main.js` SHA-256
+  `2d3041a085cbe475a63227ff40709f6d9c1595c77a58545c69edf359a57605a4`,
+  and Pixi 7.2.1;
+- wraps only `renderer.render(PIXIapp.stage)` and sends every other display
+  object or render-texture call directly to the captured Pixi implementation;
+- renders every stage request for one second after keyboard, pointer, touch,
+  wheel, or focus activity;
+- uses 60 FPS while focused and idle, 30 FPS while unfocused, and 10 FPS while
+  hidden, without changing KD's `requestAnimationFrame` or update cadence;
+- advances its deadline from the scheduled deadline, avoiding a 60 FPS target
+  quantizing down to 48 FPS on a 144 Hz display;
+- fails open on a decision error, preserves later renderer wrappers during
+  disposal, and exposes
+  `KDHybridRuntimeControl.disableGpuFramePacing` as a live control.
+
+The final gate loaded the rebuilt bootstrap
+`e142f4e615b7fdb182214b4419f0b2739bb7ffa08398fb05a38d9ea436cffd74`
+in an isolated real Electron process and restored the same 51x37,
+120-enemy room for both phases. The control was the production escape hatch,
+so it exercised the same wrapper, renderer, process, scene, and textures:
+
+| Five-second phase        | Stage requests | Real stage renders | `drawElements` | Clears | Flushes | rAF FPS |    p99 | Frames over 16.7 ms |
+| ------------------------ | -------------: | -----------------: | -------------: | -----: | ------: | ------: | -----: | ------------------: |
+| Full-render control      |            601 |                601 |          4,808 |  3,005 |     601 | 120.000 | 8.5 ms |                   0 |
+| Adaptive focused-idle    |            600 |                300 |          2,400 |  1,500 |     300 | 120.002 | 8.5 ms |                   0 |
+
+The adaptive phase therefore removed 50.08% of all three measured WebGL
+command classes while leaving the game/update request cadence unchanged. This
+is a direct GPU-submission workload result rather than an inference from the
+wrapper's own counters.
+
+The same live gate also proved the lifecycle boundary:
+
+- a real `pointermove` event changed 36/72 idle renders to 72/72 active
+  renders, then returned to 36/72 after the one-second activity window;
+- two fixed control renders and the adaptive render matched all
+  8,000,000 RGBA bytes exactly, with verifier identifier `b603ae3d`;
+- an immediate second idle stage request was skipped; and
+- a non-stage 16x16 render texture bypassed pacing exactly once and returned
+  1,024 populated bytes.
+
+Windows' aggregate 3D-engine utilization counter did not repeatably move with
+the command count because compositor work, clock scaling, window focus, and
+one-second sampling dominated this already-light scene. It is not an
+acceptance metric. The accepted claim is precise: KD's idle stage draw, clear,
+and flush submissions are halved. This does not claim that total GPU busy time
+or wall power falls by exactly 50% on every machine.
+
+Reproduction:
+
+```powershell
+npm test -- --run packages/bootstrap/src/frame-pacing.test.ts packages/bootstrap/src/rendering.test.ts
+npm run verify:frame-pacing -- --port 9227 --duration 5 --output artifacts/gpu-frame-pacing-crowded-final-v1.json
+```
+
+After packaging and reinstalling from the final manifest, a separate Intro
+smoke repeated 361 versus 180 draw/clear/flush commands, 120.000 FPS, an
+8.5 ms p99, exact 8,000,000-byte pixels, and every acceptance check passing.
+The canonical crowded and packaged-Intro report SHA-256 values are
+`94B73F3CAEB2F07F4171286BF1A0C573711EA394DEDF26864E40AF3C01C5755E`
+and
+`53561E64AE537878A23D8F1A4E4F827E930A9229291284706544E93BE28C8F5B`.
 
 ## Candidates that measurement rejected
 

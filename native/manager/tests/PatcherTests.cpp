@@ -125,7 +125,7 @@ private slots:
                  kd::PatcherState::NotInstalled);
     }
 
-    void updatesPlannerModeAndKeepsOriginalBackup()
+    void updatesSettingsAndKeepsOriginalBackup()
     {
         Fixture fixture;
         const QByteArray original =
@@ -133,9 +133,11 @@ private slots:
         kd::PatcherStatus installed;
         try {
             installed = kd::Patcher::install(
-                fixture.appRoot, true, QStringLiteral("quality"));
-            installed = kd::Patcher::updatePathfindingMode(
-                fixture.appRoot, QStringLiteral("human"));
+                fixture.appRoot, true, QStringLiteral("quality"),
+                QStringLiteral("full"));
+            installed = kd::Patcher::updateConfiguration(
+                fixture.appRoot, QStringLiteral("human"),
+                QStringLiteral("mobile"));
         } catch (const std::exception& error) {
             QFAIL(error.what());
         }
@@ -145,9 +147,17 @@ private slots:
                      .value(QStringLiteral("pathfindingMode"))
                      .toString(),
                  QStringLiteral("human"));
+        QCOMPARE(installed.manifest.value(QStringLiteral("settings"))
+                     .toObject()
+                     .value(QStringLiteral("textureMode"))
+                     .toString(),
+                 QStringLiteral("mobile"));
         QFile index(fixture.appRoot + QStringLiteral("/index.html"));
         QVERIFY(index.open(QIODevice::ReadOnly));
         QVERIFY(index.readAll().contains("\"pathfindingMode\":\"human\""));
+        index.seek(0);
+        QVERIFY(index.readAll().contains(
+            "\"rendering\":{\"textureMode\":\"mobile\"}"));
         index.close();
         try {
             kd::Patcher::uninstall(fixture.appRoot);
@@ -157,6 +167,59 @@ private slots:
         QCOMPARE(readFile(fixture.appRoot + QStringLiteral("/index.html")),
                  original);
         QCOMPARE(readFile(fixture.saveSentinel), QByteArray("do-not-touch"));
+    }
+
+    void automaticTextureModeRemovesOverride()
+    {
+        Fixture fixture;
+        try {
+            kd::Patcher::install(fixture.appRoot, true,
+                                 QStringLiteral("fast"),
+                                 QStringLiteral("full"));
+            const kd::PatcherStatus updated =
+                kd::Patcher::updateTextureMode(
+                    fixture.appRoot, QStringLiteral("auto"));
+            QCOMPARE(updated.state, kd::PatcherState::Installed);
+            QCOMPARE(updated.manifest.value(QStringLiteral("settings"))
+                         .toObject()
+                         .value(QStringLiteral("textureMode"))
+                         .toString(),
+                     QStringLiteral("auto"));
+        } catch (const std::exception& error) {
+            QFAIL(error.what());
+        }
+        QVERIFY(!readFile(fixture.appRoot + QStringLiteral("/index.html"))
+                     .contains("\"textureMode\""));
+    }
+
+    void pendingJournalIsIncompleteEvenWithManifest()
+    {
+        Fixture fixture;
+        try {
+            kd::Patcher::install(fixture.appRoot, true);
+        } catch (const std::exception& error) {
+            QFAIL(error.what());
+        }
+        writeFile(QDir(fixture.appRoot)
+                      .filePath(QStringLiteral(
+                          ".kd-hybrid/pending-installation.json")),
+                  "{}");
+        const kd::PatcherStatus current = kd::Patcher::status(fixture.appRoot);
+        QCOMPARE(current.state, kd::PatcherState::Incomplete);
+        QVERIFY(current.problems.contains(
+            QStringLiteral("pending installation manifest exists")));
+    }
+
+    void rejectsUnknownTextureMode()
+    {
+        Fixture fixture;
+        QVERIFY_EXCEPTION_THROWN(
+            kd::Patcher::install(fixture.appRoot, true,
+                                 QStringLiteral("fast"),
+                                 QStringLiteral("impossible")),
+            kd::PatcherError);
+        QCOMPARE(kd::Patcher::status(fixture.appRoot).state,
+                 kd::PatcherState::NotInstalled);
     }
 
     void refusesToRemoveModifiedPayload()

@@ -1,6 +1,12 @@
 import type { QualityTier } from "@kd-hybrid/runtime";
 
 import {
+  installKinkyDungeonFramePacing,
+  type KinkyDungeonFramePacingHandle,
+  type KinkyDungeonFramePacingMode,
+  type KinkyDungeonFramePacingStatus
+} from "./frame-pacing.js";
+import {
   installKinkyDungeonTexturePolicy,
   type KinkyDungeonTextureMode,
   type KinkyDungeonTexturePolicyHandle,
@@ -10,10 +16,12 @@ import {
 type UnknownRecord = Record<string, unknown>;
 
 export type { KinkyDungeonTextureMode } from "./texture-policy.js";
+export type { KinkyDungeonFramePacingMode } from "./frame-pacing.js";
 
 export interface KinkyDungeonRenderingStatus
   extends KinkyDungeonTexturePolicyStatus {
   readonly tier: QualityTier;
+  readonly framePacing: KinkyDungeonFramePacingStatus;
 }
 
 export interface KinkyDungeonRenderingOptions {
@@ -21,6 +29,7 @@ export interface KinkyDungeonRenderingOptions {
   readonly upstreamVersion?: string;
   readonly upstreamBundleSha256?: string;
   readonly textureMode?: KinkyDungeonTextureMode;
+  readonly framePacingMode?: KinkyDungeonFramePacingMode;
   readonly textureSampleIntervalMs?: number;
   readonly now?: () => number;
 }
@@ -29,6 +38,7 @@ export interface KinkyDungeonRenderingHandle {
   status(): KinkyDungeonRenderingStatus;
   sampleTextureMemory(): number | undefined;
   setTier(tier: QualityTier): void;
+  setFramePacingMode(mode: KinkyDungeonFramePacingMode): void;
   dispose(): void;
 }
 
@@ -60,6 +70,20 @@ export function installKinkyDungeonRendering(
       },
       target
     );
+  const framePacing: KinkyDungeonFramePacingHandle =
+    installKinkyDungeonFramePacing(
+      {
+        ...(options.upstreamVersion === undefined
+          ? {}
+          : { upstreamVersion: options.upstreamVersion }),
+        ...(options.upstreamBundleSha256 === undefined
+          ? {}
+          : { upstreamBundleSha256: options.upstreamBundleSha256 }),
+        mode: options.framePacingMode ?? "off",
+        ...(options.now === undefined ? {} : { now: options.now })
+      },
+      target
+    );
   const previousApi = target.KDHybridRendering;
   let disposed = false;
 
@@ -67,17 +91,22 @@ export function installKinkyDungeonRendering(
     status: () =>
       Object.freeze({
         tier,
-        ...textures.status()
+        ...textures.status(),
+        framePacing: framePacing.status()
       }),
     sampleTextureMemory: () => textures.sampleTextureMemory(),
     setTier: (nextTier: QualityTier) => {
       tier = nextTier;
+    },
+    setFramePacingMode: (mode: KinkyDungeonFramePacingMode) => {
+      framePacing.setMode(mode);
     },
     dispose: () => {
       if (disposed) {
         return;
       }
       disposed = true;
+      framePacing.dispose();
       textures.dispose();
       if (target.KDHybridRendering === handle) {
         if (previousApi === undefined) {

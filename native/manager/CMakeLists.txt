@@ -63,10 +63,25 @@ add_executable(KDHybridManager WIN32
     src/MainWindow.h
 )
 target_link_libraries(KDHybridManager PRIVATE kd_manager_core Qt6::Widgets)
+if(WIN32)
+    target_sources(KDHybridManager PRIVATE assets/KDHybridManager.rc)
+    target_link_libraries(KDHybridManager PRIVATE shell32)
+    add_executable(KDHybridSetWindowsIcon tools/SetWindowsIcon.cpp)
+    target_compile_features(KDHybridSetWindowsIcon PRIVATE cxx_std_20)
+endif()
+
+qt_add_resources(KDHybridManager "manager_icons"
+    PREFIX "/icons"
+    BASE "${CMAKE_CURRENT_SOURCE_DIR}/assets"
+    FILES "${CMAKE_CURRENT_SOURCE_DIR}/assets/kd-hybrid-bandage.png"
+)
 
 if(MSVC)
     target_compile_options(kd_manager_core PRIVATE /W4 /permissive-)
     target_compile_options(KDHybridManager PRIVATE /W4 /permissive-)
+    if(WIN32)
+        target_compile_options(KDHybridSetWindowsIcon PRIVATE /W4 /permissive-)
+    endif()
 else()
     target_compile_options(kd_manager_core PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(KDHybridManager PRIVATE -Wall -Wextra -Wpedantic)

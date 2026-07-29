@@ -22,6 +22,21 @@ $managerExecutable = $executableCandidates |
 if (-not $managerExecutable) {
     throw "KDHybridManager.exe was not found under $buildRoot"
 }
+$iconToolCandidates = @(
+    (Join-Path $buildRoot "$Configuration\KDHybridSetWindowsIcon.exe"),
+    (Join-Path $buildRoot "KDHybridSetWindowsIcon.exe")
+)
+$iconTool = $iconToolCandidates |
+    Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
+    Select-Object -First 1
+if (-not $iconTool) {
+    throw "KDHybridSetWindowsIcon.exe was not found under $buildRoot"
+}
+$applicationIcon = Join-Path $repoRoot `
+    "native\manager\assets\kd-hybrid-bandage.ico"
+if (-not (Test-Path -LiteralPath $applicationIcon -PathType Leaf)) {
+    throw "KD Hybrid Windows icon is missing: $applicationIcon"
+}
 
 $windeployqt = Get-Command windeployqt.exe -ErrorAction SilentlyContinue
 if (-not $windeployqt) {
@@ -68,6 +83,7 @@ Copy-Item -LiteralPath $managerExecutable -Destination $stageRoot
     --compiler-runtime `
     --no-translations `
     --no-system-d3d-compiler `
+    --skip-plugin-types generic,networkinformation,tls `
     --dir $stageRoot `
     (Join-Path $stageRoot "KDHybridManager.exe")
 if ($LASTEXITCODE -ne 0) {
@@ -103,39 +119,16 @@ Source and current SDK downloads: https://www.7-zip.org/sdk.html
 
 $expectedQtLicenseHash =
     "e3a994d82e644b03a792a930f574002658412f62407f5fee083f2555c5f23118"
-$qtRoot = Split-Path -Parent (Split-Path -Parent $windeployqt.Source)
-$qtLicense = Get-ChildItem -LiteralPath $qtRoot -Recurse -File -ErrorAction SilentlyContinue |
-    Where-Object { $_.Name -match '^LGPL-3.*\.txt$' } |
-    Select-Object -First 1
-if (-not $qtLicense) {
-    $qtLicense = @(
-        (Join-Path $repoRoot ".local\LGPL-3.0.txt"),
-        (Join-Path $outputRoot "LGPL-3.0.txt")
-    ) |
-        Where-Object {
-            if (-not (Test-Path -LiteralPath $_ -PathType Leaf)) {
-                return $false
-            }
-            $cachedHash = (
-                Get-FileHash -LiteralPath $_ -Algorithm SHA256
-            ).Hash.ToLowerInvariant()
-            return $cachedHash -eq $expectedQtLicenseHash
-        } |
-        ForEach-Object { Get-Item -LiteralPath $_ } |
-        Select-Object -First 1
-}
-if (-not $qtLicense) {
-    $qtLicenseDownload = Join-Path $outputRoot "LGPL-3.0.txt"
-    Invoke-WebRequest -Uri "https://www.gnu.org/licenses/lgpl-3.0.txt" `
-        -OutFile $qtLicenseDownload
-    $qtLicense = Get-Item -LiteralPath $qtLicenseDownload
+$qtLicense = Join-Path $repoRoot "LICENSES\LGPL-3.0.txt"
+if (-not (Test-Path -LiteralPath $qtLicense -PathType Leaf)) {
+    throw "Bundled LGPL-3.0 license is missing: $qtLicense"
 }
 $actualQtLicenseHash =
-    (Get-FileHash -LiteralPath $qtLicense.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+    (Get-FileHash -LiteralPath $qtLicense -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($actualQtLicenseHash -ne $expectedQtLicenseHash) {
     throw "LGPL-3.0 license hash mismatch: $actualQtLicenseHash"
 }
-Copy-Item -LiteralPath $qtLicense.FullName `
+Copy-Item -LiteralPath $qtLicense `
     -Destination (Join-Path $licenseRoot "Qt-LGPL-3.txt")
 [IO.File]::WriteAllText(
     (Join-Path $licenseRoot "Qt-Source-Offer.txt"),
@@ -215,6 +208,10 @@ Copy-Item -LiteralPath $sfxModulePath -Destination $patchedSfxModule -Force
     "-outputresource:$patchedSfxModule;#1"
 if ($LASTEXITCODE -ne 0) {
     throw "mt.exe failed with exit code $LASTEXITCODE"
+}
+& $iconTool $patchedSfxModule $applicationIcon
+if ($LASTEXITCODE -ne 0) {
+    throw "KDHybridSetWindowsIcon failed with exit code $LASTEXITCODE"
 }
 
 $finalExecutable = Join-Path $outputRoot "KD-Hybrid-Manager-Windows-x64.exe"

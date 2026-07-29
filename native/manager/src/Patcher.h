@@ -4,7 +4,23 @@
 #include <QString>
 #include <QStringList>
 
+#include <stdexcept>
+
 namespace kd {
+
+enum class PatcherErrorCode {
+    General,
+    PermissionDenied,
+};
+
+class PatcherError final : public std::runtime_error {
+public:
+    PatcherError(PatcherErrorCode code, const QString& message);
+    [[nodiscard]] PatcherErrorCode code() const noexcept;
+
+private:
+    PatcherErrorCode code_;
+};
 
 enum class PatcherState {
     NotInstalled,
@@ -37,10 +53,18 @@ public:
     static PatcherStatus install(const QString& selectedPath,
                                  bool allowUnknownBundle = false,
                                  const QString& pathfindingMode =
-                                     QStringLiteral("fast"));
+                                     QStringLiteral("fast"),
+                                 const QString& textureMode =
+                                     QStringLiteral("auto"));
+    static PatcherStatus updateConfiguration(
+        const QString& selectedPath,
+        const QString& pathfindingMode = {},
+        const QString& textureMode = {});
     static PatcherStatus updatePathfindingMode(
         const QString& selectedPath,
         const QString& pathfindingMode);
+    static PatcherStatus updateTextureMode(const QString& selectedPath,
+                                           const QString& textureMode);
     static PatcherStatus uninstall(const QString& selectedPath);
     static QJsonObject toJson(const PatcherStatus& value);
     static QString stateName(PatcherState state);

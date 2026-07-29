@@ -22,6 +22,7 @@ import {
   type SystemStatus,
   type WasmBatchBridge,
 } from "@kd-hybrid/runtime";
+import { runWithKDTranslatedModSourceOptimizations } from "./mod-api-translator.js";
 
 const MAX_DIMENSION = 4_096;
 const MAX_TILES = 16_777_216;
@@ -842,6 +843,11 @@ export interface KDMapGenerationAdapterOptions {
   ) => T;
   readonly directPathfindingFallbackEnabled?: () => boolean;
   readonly recordDirectPathfindingFallback?: (active: boolean) => void;
+  readonly runWithTranslatedModSourceOptimizations?: <T>(
+    callback: () => T,
+    recordActivation?: (active: boolean) => void,
+  ) => T;
+  readonly recordTranslatedModSourceOptimizations?: (active: boolean) => void;
   readonly enemySelectorCacheEnabled?: () => boolean;
   /** @deprecated Use enemySelectorCacheEnabled. */
   readonly enemySelectorAngerCacheEnabled?: () => boolean;
@@ -1155,17 +1161,29 @@ export function createKinkyDungeonMapGenerationHandler(
       state.depth += 1;
       try {
         const invokeOfficial = () => Reflect.apply(official, globalThis, args);
+        const invokeWithDirectPathfindingFallback = () => {
+          if (
+            options.runWithDirectPathfindingFallback !== undefined &&
+            options.directPathfindingFallbackEnabled?.() !== false
+          ) {
+            return options.runWithDirectPathfindingFallback(
+              invokeOfficial,
+              options.recordDirectPathfindingFallback,
+            );
+          }
+          options.recordDirectPathfindingFallback?.(false);
+          return invokeOfficial();
+        };
         if (
-          options.runWithDirectPathfindingFallback !== undefined &&
-          options.directPathfindingFallbackEnabled?.() !== false
+          outermost &&
+          options.runWithTranslatedModSourceOptimizations !== undefined
         ) {
-          return options.runWithDirectPathfindingFallback(
-            invokeOfficial,
-            options.recordDirectPathfindingFallback,
+          return options.runWithTranslatedModSourceOptimizations(
+            invokeWithDirectPathfindingFallback,
+            options.recordTranslatedModSourceOptimizations,
           );
         }
-        options.recordDirectPathfindingFallback?.(false);
-        return invokeOfficial();
+        return invokeWithDirectPathfindingFallback();
       } finally {
         state.depth -= 1;
         if (outermost) {
@@ -3856,10 +3874,21 @@ export function installKinkyDungeonMapGenerationAdapter(
             },
           );
         },
+        runWithTranslatedModSourceOptimizations: (
+          callback,
+          recordActivation,
+        ) =>
+          runWithKDTranslatedModSourceOptimizations(
+            callback,
+            undefined,
+            recordActivation,
+          ),
         directPathfindingFallbackEnabled:
           browserMapGenerationDirectPathfindingFallbackEnabled,
         recordDirectPathfindingFallback:
           browserRecordMapGenerationDirectPathfindingFallback,
+        recordTranslatedModSourceOptimizations:
+          browserRecordTranslatedModSourceOptimization,
         enemySelectorCacheEnabled: () =>
           !runtime.dispatcher.hasHooks("mapGeneration"),
       },
@@ -4716,6 +4745,20 @@ function browserMapGenerationDirectPathfindingFallbackEnabled(): boolean {
     globalThis.KDHybridRuntimeControl
       ?.disableMapGenerationPathfindingDirectFallback !== true
   );
+}
+
+function browserRecordTranslatedModSourceOptimization(active: boolean): void {
+  const stats =
+    globalThis.KDHybridRuntimeControl
+      ?.translatedModSourceOptimizationStats;
+  if (stats === undefined) {
+    return;
+  }
+  if (active) {
+    stats.optimizedMaps += 1;
+  } else {
+    stats.fallbackMaps += 1;
+  }
 }
 
 function browserMapGenerationPathCacheEdgeIdentityEnabled(): boolean {

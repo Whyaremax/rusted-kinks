@@ -72,8 +72,12 @@ jobs:
         include:
           - runner: ubuntu-24.04
             arch: x86_64
+            linuxdeploy_sha256: e87ee0815d109282fdda73e34c2361d64d02b0ffaea3674b18f1fd1f6a687dcf
+            qt_plugin_sha256: be1b7e166bf9975cfb694ebe6759ba40502ffc6196440d3e64aa90c4dbd67e9f
           - runner: ubuntu-24.04-arm
             arch: aarch64
+            linuxdeploy_sha256: 650ed1d045a09ab87855be1963f4f56ac7cf6defb6b2e2f4af0a3225f3d2d803
+            qt_plugin_sha256: 5525e6c49c3c774c02b8864d2acc2ae4c5c0ccc3327f7dce626deaa36348e5c6
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -105,6 +109,8 @@ jobs:
           curl --fail --location --retry 3 \
             --output linuxdeploy-plugin-qt-${{ matrix.arch }}.AppImage \
             https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-${{ matrix.arch }}.AppImage
+          echo "${{ matrix.linuxdeploy_sha256 }}  linuxdeploy-${{ matrix.arch }}.AppImage" | sha256sum --check
+          echo "${{ matrix.qt_plugin_sha256 }}  linuxdeploy-plugin-qt-${{ matrix.arch }}.AppImage" | sha256sum --check
           chmod +x linuxdeploy-${{ matrix.arch }}.AppImage linuxdeploy-plugin-qt-${{ matrix.arch }}.AppImage
       - name: Package AppImage
         env:

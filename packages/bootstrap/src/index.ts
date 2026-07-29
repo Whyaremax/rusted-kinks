@@ -22,6 +22,10 @@ import {
   type KinkyDungeonRenderingHandle
 } from "./rendering.js";
 import {
+  installKinkyDungeonModTranslator,
+  type KinkyDungeonModTranslatorHandle
+} from "./mod-api-translator.js";
+import {
   installKinkyDungeonStartup,
   type KinkyDungeonStartupHandle
 } from "./startup.js";
@@ -41,6 +45,7 @@ export interface BootstrapHandle {
   readonly runtime: KDHybridRuntime;
   readonly rendering: KinkyDungeonRenderingHandle;
   readonly startup: KinkyDungeonStartupHandle;
+  readonly modTranslator: KinkyDungeonModTranslatorHandle;
   readonly nativeReady: Promise<boolean>;
   dispose(): void;
 }
@@ -51,6 +56,10 @@ export function installBootstrap(): BootstrapHandle {
   if (active !== null) {
     return active;
   }
+  // This runs before KD's main bundle. The proof object therefore exists when
+  // source fast paths capture their compatibility boundary, while the loader
+  // hook waits until KD has defined its mod globals.
+  const modTranslator = installKinkyDungeonModTranslator();
   const startup = installKinkyDungeonStartup();
   const config = globalThis.KDHybridBootstrapConfig;
   const runtime = new KDHybridRuntime({
@@ -79,6 +88,7 @@ export function installBootstrap(): BootstrapHandle {
     textureMode:
       config?.rendering?.textureMode ??
       (config?.quality === "high" ? "full" : "mobile"),
+    framePacingMode: config?.rendering?.framePacingMode ?? "adaptive",
     ...(config?.upstreamVersion === undefined
       ? {}
       : { upstreamVersion: config.upstreamVersion }),
@@ -118,12 +128,14 @@ export function installBootstrap(): BootstrapHandle {
     runtime,
     rendering,
     startup,
+    modTranslator,
     nativeReady,
     dispose: () => {
       stopFrames();
       stopQuality();
       rendering.dispose();
       startup.dispose();
+      modTranslator.dispose();
       runtime.dispose();
       globalThis.KDHybridRuntimeInternal = undefined;
       active = null;

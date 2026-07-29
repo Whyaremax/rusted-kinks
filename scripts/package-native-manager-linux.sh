@@ -32,9 +32,14 @@ cp "$repo_root/native/manager/assets/kd-hybrid-manager.svg" \
 cp "$repo_root/LICENSE" "$appdir/usr/share/licenses/KD-Hybrid-MIT.txt"
 cp "$repo_root/LICENSES/MPL-2.0.txt" \
   "$appdir/usr/share/licenses/MPL-2.0.txt"
+cp "$repo_root/LICENSES/LGPL-3.0.txt" \
+  "$appdir/usr/share/licenses/Qt-LGPL-3.txt"
 cp "$repo_root/NOTICE.md" "$appdir/usr/share/licenses/KD-Hybrid-NOTICE.txt"
 cp "$repo_root/native/manager/THIRD_PARTY.md" \
   "$appdir/usr/share/licenses/THIRD-PARTY.txt"
+printf '%s\n' \
+  "Qt source code and licensing information: https://www.qt.io/download-open-source" \
+  > "$appdir/usr/share/licenses/Qt-Source-Offer.txt"
 cp -R "$repo_root/dist/bootstrap/source/MPL-2.0" \
   "$appdir/usr/share/kd-hybrid/source/"
 

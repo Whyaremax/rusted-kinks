@@ -6,6 +6,7 @@
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
+#include <QFileDevice>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -14,8 +15,6 @@
 #include <QUuid>
 
 #include <algorithm>
-#include <stdexcept>
-
 namespace {
 
 constexpr auto kKnownGameVersion = "5.4.92";
@@ -28,7 +27,22 @@ constexpr auto kBootstrapScript = "kd-hybrid/kd-hybrid-bootstrap.js";
 
 [[noreturn]] void fail(const QString& message)
 {
-    throw std::runtime_error(message.toStdString());
+    throw kd::PatcherError(kd::PatcherErrorCode::General, message);
+}
+
+[[noreturn]] void failPermission(const QString& message)
+{
+    throw kd::PatcherError(kd::PatcherErrorCode::PermissionDenied, message);
+}
+
+void failFile(const QString& action, const QFileDevice& file)
+{
+    const QString message =
+        QStringLiteral("%1: %2").arg(action, file.errorString());
+    if (file.error() == QFileDevice::PermissionsError) {
+        failPermission(message);
+    }
+    fail(message);
 }
 
 QString validatePathfindingMode(const QString& mode)
@@ -36,6 +50,16 @@ QString validatePathfindingMode(const QString& mode)
     if (mode != QLatin1String("quality") && mode != QLatin1String("fast")
         && mode != QLatin1String("human")) {
         fail(QStringLiteral("Unknown pathfinding mode: %1").arg(mode));
+    }
+    return mode;
+}
+
+QString validateTextureMode(const QString& mode)
+{
+    if (mode != QLatin1String("auto") && mode != QLatin1String("original")
+        && mode != QLatin1String("full")
+        && mode != QLatin1String("mobile")) {
+        fail(QStringLiteral("Unknown texture mode: %1").arg(mode));
     }
     return mode;
 }
@@ -105,11 +129,27 @@ void validateLayout(const QString& appRoot)
     }
 }
 
+void validateOptionalManagedDirectory(const QString& appRoot,
+                                      const QString& relativePath)
+{
+    const QString target = resolveInside(appRoot, relativePath);
+    const QFileInfo info(target);
+    if (!info.exists()) {
+        return;
+    }
+    if (!info.isDir() || info.isSymLink()
+        || QDir::cleanPath(info.canonicalFilePath())
+                   .compare(QDir::cleanPath(target), pathCaseSensitivity())
+            != 0) {
+        fail(QStringLiteral("Managed directory is unsafe: %1").arg(target));
+    }
+}
+
 QByteArray readAll(const QString& path)
 {
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly)) {
-        fail(QStringLiteral("Could not read %1: %2").arg(path, file.errorString()));
+        failFile(QStringLiteral("Could not read %1").arg(path), file);
     }
     return file.readAll();
 }
@@ -124,7 +164,7 @@ QString sha256File(const QString& path)
 {
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly)) {
-        fail(QStringLiteral("Could not hash %1: %2").arg(path, file.errorString()));
+        failFile(QStringLiteral("Could not hash %1").arg(path), file);
     }
     QCryptographicHash hash(QCryptographicHash::Sha256);
     if (!hash.addData(&file)) {
@@ -146,15 +186,15 @@ void atomicWrite(const QString& path, const QByteArray& bytes)
     ensureParent(path);
     QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly)) {
-        fail(QStringLiteral("Could not open %1: %2").arg(path, file.errorString()));
+        failFile(QStringLiteral("Could not open %1").arg(path), file);
     }
     if (file.write(bytes) != bytes.size()) {
         file.cancelWriting();
         fail(QStringLiteral("Short write while updating %1").arg(path));
     }
     if (!file.commit()) {
-        fail(QStringLiteral("Could not atomically update %1: %2")
-                 .arg(path, file.errorString()));
+        failFile(QStringLiteral("Could not atomically update %1").arg(path),
+                 file);
     }
 }
 
@@ -163,11 +203,62 @@ void writeExclusive(const QString& path, const QByteArray& bytes)
     ensureParent(path);
     QFile file(path);
     if (!file.open(QIODevice::WriteOnly | QIODevice::NewOnly)) {
-        fail(QStringLiteral("Refusing to overwrite backup %1: %2")
-                 .arg(path, file.errorString()));
+        failFile(QStringLiteral("Refusing to overwrite backup %1").arg(path),
+                 file);
     }
     if (file.write(bytes) != bytes.size() || !file.flush()) {
         fail(QStringLiteral("Could not write backup %1").arg(path));
+    }
+}
+
+void verifyWritableDirectory(const QString& path)
+{
+    const QString probe = QDir(path).filePath(
+        QStringLiteral(".kd-hybrid-write-test-%1.tmp")
+            .arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    QFile file(probe);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::NewOnly)) {
+        failFile(QStringLiteral("KD folder is not writable: %1").arg(path),
+                 file);
+    }
+    if (file.write("ok", 2) != 2 || !file.flush()) {
+        const QString error = file.errorString();
+        file.close();
+        QFile::remove(probe);
+        failPermission(
+            QStringLiteral("KD folder write test failed: %1: %2")
+                .arg(path, error));
+    }
+    file.close();
+    if (!QFile::remove(probe)) {
+        failPermission(
+            QStringLiteral("KD folder write test could not remove %1")
+                .arg(probe));
+    }
+}
+
+void verifyWritableFile(const QString& path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadWrite)) {
+        failFile(QStringLiteral("KD file is not writable: %1").arg(path),
+                 file);
+    }
+}
+
+void verifyWritableLayout(const QString& appRoot)
+{
+    verifyWritableDirectory(appRoot);
+    verifyWritableDirectory(resolveInside(appRoot, QStringLiteral("out")));
+    verifyWritableFile(resolveInside(appRoot, QStringLiteral("index.html")));
+    verifyWritableFile(resolveInside(appRoot, QStringLiteral("out/main.js")));
+    for (const QString& relative :
+         {QString::fromLatin1(kStateDirectory),
+          QString::fromLatin1(kDestinationDirectory)}) {
+        const QString existing = resolveInside(appRoot, relative);
+        if (QFileInfo(existing).isDir()) {
+            verifyWritableDirectory(existing);
+        }
     }
 }
 
@@ -305,6 +396,16 @@ QString stateName(kd::PatcherState state)
 
 namespace kd {
 
+PatcherError::PatcherError(PatcherErrorCode code, const QString& message)
+    : std::runtime_error(message.toUtf8().constData()), code_(code)
+{
+}
+
+PatcherErrorCode PatcherError::code() const noexcept
+{
+    return code_;
+}
+
 QString Patcher::normalizeAppRoot(const QString& selectedPath)
 {
     QFileInfo selected(selectedPath);
@@ -349,6 +450,10 @@ PatcherStatus Patcher::status(const QString& selectedPath)
     PatcherStatus result;
     result.inspection = inspect(selectedPath);
     const QString& appRoot = result.inspection.appRoot;
+    validateOptionalManagedDirectory(
+        appRoot, QString::fromLatin1(kStateDirectory));
+    validateOptionalManagedDirectory(
+        appRoot, QString::fromLatin1(kDestinationDirectory));
     const QString manifestPath = resolveInside(appRoot, kManifestPath);
     const QString pendingPath = resolveInside(appRoot, kPendingPath);
     if (!QFileInfo::exists(manifestPath)) {
@@ -364,6 +469,10 @@ PatcherStatus Patcher::status(const QString& selectedPath)
 
     result.manifest =
         validateManifest(readJsonObject(manifestPath), appRoot);
+    if (QFileInfo::exists(pendingPath)) {
+        result.problems.append(
+            QStringLiteral("pending installation manifest exists"));
+    }
     const QJsonObject index =
         result.manifest.value(QStringLiteral("index")).toObject();
     const QString indexPath =
@@ -400,17 +509,21 @@ PatcherStatus Patcher::status(const QString& selectedPath)
         result.problems.append(
             QStringLiteral("out/main.js changed after KD Hybrid installation"));
     }
-    result.state = result.problems.isEmpty() ? PatcherState::Installed
-                                             : PatcherState::Modified;
+    result.state = QFileInfo::exists(pendingPath)
+        ? PatcherState::Incomplete
+        : result.problems.isEmpty() ? PatcherState::Installed
+                                    : PatcherState::Modified;
     return result;
 }
 
 PatcherStatus Patcher::install(const QString& selectedPath,
                                bool allowUnknownBundle,
-                               const QString& pathfindingModeInput)
+                               const QString& pathfindingModeInput,
+                               const QString& textureModeInput)
 {
     const QString pathfindingMode =
         validatePathfindingMode(pathfindingModeInput);
+    const QString textureMode = validateTextureMode(textureModeInput);
     const PatcherStatus current = status(selectedPath);
     if (current.state == PatcherState::Installed) {
         return current;
@@ -431,6 +544,7 @@ PatcherStatus Patcher::install(const QString& selectedPath,
             "out/main.js already contains the recognized source patch but "
             "has no installation manifest or original backup"));
     }
+    verifyWritableLayout(inspection.appRoot);
 
     const QStringList files = payloadFiles();
     const QString bundlePath =
@@ -462,7 +576,7 @@ PatcherStatus Patcher::install(const QString& selectedPath,
             "Could not uniquely locate ./out/main.js in index.html"));
     }
 
-    const QJsonObject config{
+    QJsonObject config{
         {QStringLiteral("upstreamVersion"),
          inspection.knownBundle ? QJsonValue(inspection.gameVersion)
                                 : QJsonValue(QJsonValue::Null)},
@@ -473,6 +587,11 @@ PatcherStatus Patcher::install(const QString& selectedPath,
         {QStringLiteral("quality"), QStringLiteral("auto")},
         {QStringLiteral("pathfindingMode"), pathfindingMode},
     };
+    if (textureMode != QLatin1String("auto")) {
+        config.insert(
+            QStringLiteral("rendering"),
+            QJsonObject{{QStringLiteral("textureMode"), textureMode}});
+    }
     const QString injection =
         QStringLiteral(
             "<script>globalThis.KDHybridBootstrapConfig=Object.freeze(%1);"
@@ -539,6 +658,7 @@ PatcherStatus Patcher::install(const QString& selectedPath,
         {QStringLiteral("settings"),
          QJsonObject{
              {QStringLiteral("pathfindingMode"), pathfindingMode},
+             {QStringLiteral("textureMode"), textureMode},
          }},
     };
     if (sourcePatch.applied) {
@@ -556,16 +676,21 @@ PatcherStatus Patcher::install(const QString& selectedPath,
     }
     atomicWrite(indexPath, patchedIndex);
     atomicWriteJson(resolveInside(inspection.appRoot, kManifestPath), manifest);
-    QFile::remove(resolveInside(inspection.appRoot, kPendingPath));
+    const QString pendingPath =
+        resolveInside(inspection.appRoot, kPendingPath);
+    if (!QFile::remove(pendingPath)) {
+        fail(QStringLiteral("Installed successfully, but could not remove "
+                            "the pending installation journal: %1")
+                 .arg(pendingPath));
+    }
     return status(inspection.appRoot);
 }
 
-PatcherStatus Patcher::updatePathfindingMode(
+PatcherStatus Patcher::updateConfiguration(
     const QString& selectedPath,
-    const QString& pathfindingModeInput)
+    const QString& pathfindingModeInput,
+    const QString& textureModeInput)
 {
-    const QString pathfindingMode =
-        validatePathfindingMode(pathfindingModeInput);
     const PatcherStatus current = status(selectedPath);
     if (current.state != PatcherState::Installed
         || current.manifest.isEmpty()) {
@@ -575,6 +700,7 @@ PatcherStatus Patcher::updatePathfindingMode(
                       current.problems.join(QStringLiteral("; "))));
     }
     const QString& appRoot = current.inspection.appRoot;
+    verifyWritableLayout(appRoot);
     const QJsonObject index =
         current.manifest.value(QStringLiteral("index")).toObject();
     const QString indexPath =
@@ -596,7 +722,31 @@ PatcherStatus Patcher::updatePathfindingMode(
         fail(QStringLiteral("Invalid KD Hybrid bootstrap configuration"));
     }
     QJsonObject config = document.object();
+    const QJsonObject currentSettings =
+        current.manifest.value(QStringLiteral("settings")).toObject();
+    const QString pathfindingMode = validatePathfindingMode(
+        pathfindingModeInput.isEmpty()
+            ? currentSettings.value(QStringLiteral("pathfindingMode"))
+                  .toString(QStringLiteral("fast"))
+            : pathfindingModeInput);
+    const QString textureMode = validateTextureMode(
+        textureModeInput.isEmpty()
+            ? currentSettings.value(QStringLiteral("textureMode"))
+                  .toString(QStringLiteral("auto"))
+            : textureModeInput);
     config.insert(QStringLiteral("pathfindingMode"), pathfindingMode);
+    QJsonObject rendering =
+        config.value(QStringLiteral("rendering")).toObject();
+    if (textureMode == QLatin1String("auto")) {
+        rendering.remove(QStringLiteral("textureMode"));
+    } else {
+        rendering.insert(QStringLiteral("textureMode"), textureMode);
+    }
+    if (rendering.isEmpty()) {
+        config.remove(QStringLiteral("rendering"));
+    } else {
+        config.insert(QStringLiteral("rendering"), rendering);
+    }
     const QString replacement =
         QStringLiteral(
             "<script>globalThis.KDHybridBootstrapConfig=Object.freeze(%1);"
@@ -613,12 +763,31 @@ PatcherStatus Patcher::updatePathfindingMode(
         QStringLiteral("settings"),
         QJsonObject{
             {QStringLiteral("pathfindingMode"), pathfindingMode},
+            {QStringLiteral("textureMode"), textureMode},
         });
     atomicWriteJson(resolveInside(appRoot, kPendingPath), manifest);
     atomicWrite(indexPath, patchedIndex);
     atomicWriteJson(resolveInside(appRoot, kManifestPath), manifest);
-    QFile::remove(resolveInside(appRoot, kPendingPath));
+    const QString pendingPath = resolveInside(appRoot, kPendingPath);
+    if (!QFile::remove(pendingPath)) {
+        fail(QStringLiteral("Settings updated, but could not remove the "
+                            "pending installation journal: %1")
+                 .arg(pendingPath));
+    }
     return status(appRoot);
+}
+
+PatcherStatus Patcher::updatePathfindingMode(
+    const QString& selectedPath,
+    const QString& pathfindingMode)
+{
+    return updateConfiguration(selectedPath, pathfindingMode, {});
+}
+
+PatcherStatus Patcher::updateTextureMode(const QString& selectedPath,
+                                         const QString& textureMode)
+{
+    return updateConfiguration(selectedPath, {}, textureMode);
 }
 
 PatcherStatus Patcher::uninstall(const QString& selectedPath)
@@ -633,6 +802,7 @@ PatcherStatus Patcher::uninstall(const QString& selectedPath)
                  .arg(current.problems.join("; ")));
     }
     const QString& appRoot = current.inspection.appRoot;
+    verifyWritableLayout(appRoot);
     const QJsonObject index =
         current.manifest.value(QStringLiteral("index")).toObject();
     const QString backupPath =

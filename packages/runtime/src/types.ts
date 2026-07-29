@@ -129,6 +129,11 @@ export interface MapGenerationPathCacheEdgeIdentityStats {
   fallbackMaps: number;
 }
 
+export interface TranslatedModSourceOptimizationStats {
+  optimizedMaps: number;
+  fallbackMaps: number;
+}
+
 declare global {
   // eslint-disable-next-line no-var
   var KDHybrid: KDHybridPublicApi | undefined;
@@ -143,6 +148,7 @@ declare global {
         pathfindingMode?: PathfindingMode;
         rendering?: {
           textureMode?: "original" | "full" | "mobile";
+          framePacingMode?: "off" | "adaptive";
         };
       }
     | undefined;
@@ -156,6 +162,10 @@ declare global {
         disableMapGenerationPathCacheEdgeIdentitySkip?: boolean;
         mapGenerationPathCacheEdgeIdentityStats?:
           MapGenerationPathCacheEdgeIdentityStats;
+        disableTranslatedModSourceOptimizations?: boolean;
+        translatedModSourceOptimizationStats?:
+          TranslatedModSourceOptimizationStats;
+        disableGpuFramePacing?: boolean;
       }
     | undefined;
 }

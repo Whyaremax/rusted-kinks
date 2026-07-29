@@ -413,7 +413,11 @@ export async function status(appRootInput: string): Promise<PatcherStatus> {
     problems.push("out/main.js changed after KD Hybrid installation");
   }
   return Object.freeze({
-    state: problems.length === 0 ? "installed" : "modified",
+    state: pending
+      ? "incomplete"
+      : problems.length === 0
+        ? "installed"
+        : "modified",
     appRoot,
     manifest,
     problems

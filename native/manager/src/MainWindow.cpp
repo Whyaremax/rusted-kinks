@@ -9,17 +9,22 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFrame>
+#include <QIcon>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QMimeData>
-#include <QPainter>
 #include <QPlainTextEdit>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QSettings>
 #include <QTime>
 #include <QUrl>
+
+#ifdef Q_OS_WIN
+#include <windows.h>
+#include <shellapi.h>
+#endif
 
 namespace {
 
@@ -33,22 +38,41 @@ QFrame* card()
 
 QIcon applicationIcon()
 {
-    QPixmap image(64, 64);
-    image.fill(Qt::transparent);
-    QPainter painter(&image);
-    painter.setRenderHint(QPainter::Antialiasing);
-    painter.setPen(QPen(QColor(QStringLiteral("#f1b15d")), 6,
-                        Qt::SolidLine, Qt::RoundCap));
-    painter.drawArc(QRectF(8, 19, 30, 26), 45 * 16, 270 * 16);
-    painter.setPen(QPen(QColor(QStringLiteral("#bc5371")), 6,
-                        Qt::SolidLine, Qt::RoundCap));
-    painter.drawArc(QRectF(26, 19, 30, 26), 225 * 16, 270 * 16);
-    return QIcon(image);
+    return QIcon(QStringLiteral(":/icons/kd-hybrid-bandage.png"));
 }
 
 QString exceptionMessage(const std::exception& error)
 {
     return QString::fromUtf8(error.what());
+}
+
+bool relaunchElevated(const QString& gameRoot)
+{
+#ifdef Q_OS_WIN
+    const QString executable =
+        QDir::toNativeSeparators(QCoreApplication::applicationFilePath());
+    QString escapedRoot = QDir::toNativeSeparators(gameRoot);
+    escapedRoot.replace(QStringLiteral("\""), QStringLiteral("\\\""));
+    const QString parameters =
+        QStringLiteral("--game-root \"%1\"").arg(escapedRoot);
+    SHELLEXECUTEINFOW info{};
+    info.cbSize = sizeof(info);
+    info.fMask = SEE_MASK_NOCLOSEPROCESS;
+    info.lpVerb = L"runas";
+    info.lpFile = reinterpret_cast<LPCWSTR>(executable.utf16());
+    info.lpParameters = reinterpret_cast<LPCWSTR>(parameters.utf16());
+    info.nShow = SW_SHOWNORMAL;
+    if (!ShellExecuteExW(&info)) {
+        return false;
+    }
+    if (info.hProcess != nullptr) {
+        CloseHandle(info.hProcess);
+    }
+    return true;
+#else
+    Q_UNUSED(gameRoot);
+    return false;
+#endif
 }
 
 } // namespace
@@ -58,8 +82,8 @@ MainWindow::MainWindow(const QString& initialPath, QWidget* parent)
 {
     setWindowTitle(QStringLiteral("KD Hybrid Manager"));
     setWindowIcon(applicationIcon());
-    setMinimumSize(760, 620);
-    resize(860, 680);
+    setMinimumSize(760, 800);
+    resize(860, 900);
     setAcceptDrops(true);
 
     auto* central = new QWidget;
@@ -90,7 +114,7 @@ MainWindow::MainWindow(const QString& initialPath, QWidget* parent)
     pathEdit_->setPlaceholderText(
         QStringLiteral("Choose the folder containing KinkyDungeon.exe"));
     pathEdit_->setClearButtonEnabled(true);
-    browseButton_ = new QPushButton(QStringLiteral("Browse…"));
+    browseButton_ = new QPushButton(QStringLiteral("Browse..."));
     browseButton_->setObjectName(QStringLiteral("secondaryButton"));
     refreshButton_ = new QPushButton(QStringLiteral("Check"));
     refreshButton_->setObjectName(QStringLiteral("secondaryButton"));
@@ -102,6 +126,7 @@ MainWindow::MainWindow(const QString& initialPath, QWidget* parent)
     root->addWidget(pathCard);
 
     auto* plannerCard = card();
+    plannerCard->setMinimumHeight(230);
     auto* plannerLayout = new QVBoxLayout(plannerCard);
     auto* plannerLabel = new QLabel(QStringLiteral("Pathfinding strategy"));
     plannerLabel->setObjectName(QStringLiteral("sectionTitle"));
@@ -126,10 +151,33 @@ MainWindow::MainWindow(const QString& initialPath, QWidget* parent)
     applyModeButton_->setObjectName(QStringLiteral("secondaryButton"));
     applyModeButton_->setEnabled(false);
     plannerRow->addWidget(pathfindingMode_, 1);
-    plannerRow->addWidget(applyModeButton_);
     plannerLayout->addWidget(plannerLabel);
     plannerLayout->addWidget(plannerDetail);
     plannerLayout->addLayout(plannerRow);
+
+    auto* textureLabel = new QLabel(QStringLiteral("Texture memory policy"));
+    textureLabel->setObjectName(QStringLiteral("sectionTitle"));
+    auto* textureDetail = new QLabel(
+        QStringLiteral("Automatic is recommended. Other choices force the "
+                       "original, full-size, or mobile texture atlas."));
+    textureDetail->setObjectName(QStringLiteral("detail"));
+    textureDetail->setWordWrap(true);
+    auto* textureRow = new QHBoxLayout;
+    textureMode_ = new QComboBox;
+    textureMode_->addItem(QStringLiteral("Automatic (recommended)"),
+                          QStringLiteral("auto"));
+    textureMode_->addItem(QStringLiteral("Original KD setting"),
+                          QStringLiteral("original"));
+    textureMode_->addItem(QStringLiteral("Full atlas"),
+                          QStringLiteral("full"));
+    textureMode_->addItem(QStringLiteral("Mobile atlas"),
+                          QStringLiteral("mobile"));
+    textureRow->addWidget(textureMode_, 1);
+    textureRow->addWidget(applyModeButton_);
+    plannerLayout->addSpacing(8);
+    plannerLayout->addWidget(textureLabel);
+    plannerLayout->addWidget(textureDetail);
+    plannerLayout->addLayout(textureRow);
     root->addWidget(plannerCard);
 
     auto* statusCard = card();
@@ -174,7 +222,9 @@ MainWindow::MainWindow(const QString& initialPath, QWidget* parent)
         QStringLiteral("Safety: the bootstrap is installed only after the "
                        "11 MB upstream bundle matches a known SHA-256. "
                        "index.html and any source-patched bundle are backed up; "
-                       "every installed file is recorded before activation."));
+                       "every installed file is recorded before activation. "
+                       "It runs as your current user and offers administrator "
+                       "relaunch only if the game folder denies writes."));
     safety->setObjectName(QStringLiteral("safety"));
     safety->setWordWrap(true);
     root->addWidget(safety);
@@ -249,7 +299,7 @@ MainWindow::MainWindow(const QString& initialPath, QWidget* parent)
             border: 1px solid #35313a;
             border-radius: 10px;
         }
-        QLineEdit, QPlainTextEdit {
+        QLineEdit, QPlainTextEdit, QComboBox {
             background: #111015;
             color: #f4eef2;
             border: 1px solid #403a45;
@@ -257,7 +307,15 @@ MainWindow::MainWindow(const QString& initialPath, QWidget* parent)
             padding: 9px;
             selection-background-color: #8a3f5b;
         }
-        QLineEdit:focus, QPlainTextEdit:focus {
+        QComboBox {
+            min-height: 20px;
+            padding: 6px 9px;
+        }
+        QComboBox::drop-down {
+            width: 28px;
+            border: none;
+        }
+        QLineEdit:focus, QPlainTextEdit:focus, QComboBox:focus {
             border-color: #bc6a80;
         }
         QPushButton {
@@ -312,7 +370,7 @@ MainWindow::MainWindow(const QString& initialPath, QWidget* parent)
     connect(installButton_, &QPushButton::clicked, this,
             &MainWindow::installBootstrap);
     connect(applyModeButton_, &QPushButton::clicked, this,
-            &MainWindow::applyPathfindingMode);
+            &MainWindow::applyConfiguration);
     connect(uninstallButton_, &QPushButton::clicked, this,
             &MainWindow::uninstallBootstrap);
     connect(openFolderButton_, &QPushButton::clicked, this, [this] {
@@ -344,6 +402,12 @@ void MainWindow::dragEnterEvent(QDragEnterEvent* event)
 
 void MainWindow::dropEvent(QDropEvent* event)
 {
+    if (!event->mimeData()->hasUrls()
+        || event->mimeData()->urls().size() != 1
+        || !event->mimeData()->urls().first().isLocalFile()) {
+        event->ignore();
+        return;
+    }
     const QString path = event->mimeData()->urls().first().toLocalFile();
     setGamePath(path);
     refreshStatus();
@@ -414,19 +478,21 @@ void MainWindow::installBootstrap()
     runOperation(QStringLiteral("Install"), [this] {
         return kd::Patcher::install(
             pathEdit_->text().trimmed(), false,
-            pathfindingMode_->currentData().toString());
+            pathfindingMode_->currentData().toString(),
+            textureMode_->currentData().toString());
     });
 }
 
-void MainWindow::applyPathfindingMode()
+void MainWindow::applyConfiguration()
 {
     if (!hasStatus_ || status_.state != kd::PatcherState::Installed) {
         return;
     }
-    runOperation(QStringLiteral("Update pathfinding mode"), [this] {
-        return kd::Patcher::updatePathfindingMode(
+    runOperation(QStringLiteral("Update settings"), [this] {
+        return kd::Patcher::updateConfiguration(
             pathEdit_->text().trimmed(),
-            pathfindingMode_->currentData().toString());
+            pathfindingMode_->currentData().toString(),
+            textureMode_->currentData().toString());
     });
 }
 
@@ -460,6 +526,32 @@ void MainWindow::runOperation(
         hasStatus_ = true;
         displayStatus(status_);
         appendLog(label + QStringLiteral(" completed safely."));
+    } catch (const kd::PatcherError& error) {
+        appendLog(label + QStringLiteral(" failed: ") + exceptionMessage(error));
+        if (error.code() == kd::PatcherErrorCode::PermissionDenied) {
+            const auto answer = QMessageBox::question(
+                this, QStringLiteral("Folder permission denied"),
+                exceptionMessage(error)
+                    + QStringLiteral(
+                        "\n\nRelaunch KD Hybrid Manager as administrator? "
+                        "Normal runs never request administrator access."));
+            if (answer == QMessageBox::Yes) {
+                if (relaunchElevated(pathEdit_->text().trimmed())) {
+                    appendLog(QStringLiteral(
+                        "Elevated manager launched. This window will close."));
+                    QCoreApplication::quit();
+                    return;
+                }
+                QMessageBox::critical(
+                    this, QStringLiteral("Relaunch failed"),
+                    QStringLiteral(
+                        "Windows did not start the elevated manager."));
+            }
+        } else {
+            QMessageBox::critical(this, label + QStringLiteral(" failed"),
+                                  exceptionMessage(error));
+        }
+        refreshStatus();
     } catch (const std::exception& error) {
         appendLog(label + QStringLiteral(" failed: ") + exceptionMessage(error));
         QMessageBox::critical(this, label + QStringLiteral(" failed"),
@@ -491,12 +583,12 @@ void MainWindow::displayStatus(const kd::PatcherStatus& status)
 
     if (status.inspection.knownBundle) {
         compatibilityLabel_->setText(
-            QStringLiteral("Verified KD %1 · Electron package %2")
+            QStringLiteral("Verified KD %1 | Electron package %2")
                 .arg(status.inspection.gameVersion,
                      status.inspection.packageVersion));
     } else {
         compatibilityLabel_->setText(
-            QStringLiteral("Unknown game bundle · patching disabled"));
+            QStringLiteral("Unknown game bundle | patching disabled"));
     }
     if (status.problems.isEmpty()) {
         detailLabel_->setText(
@@ -531,6 +623,15 @@ void MainWindow::displayStatus(const kd::PatcherStatus& status)
         if (index >= 0) {
             pathfindingMode_->setCurrentIndex(index);
         }
+        const QString textureMode =
+            status.manifest.value(QStringLiteral("settings"))
+                .toObject()
+                .value(QStringLiteral("textureMode"))
+                .toString(QStringLiteral("auto"));
+        const int textureIndex = textureMode_->findData(textureMode);
+        if (textureIndex >= 0) {
+            textureMode_->setCurrentIndex(textureIndex);
+        }
     }
     openFolderButton_->setEnabled(true);
 }
@@ -542,6 +643,7 @@ void MainWindow::setBusy(bool busy)
     browseButton_->setEnabled(!busy);
     refreshButton_->setEnabled(!busy);
     pathfindingMode_->setEnabled(!busy);
+    textureMode_->setEnabled(!busy);
     applyModeButton_->setEnabled(!busy && hasStatus_
                                  && status_.state
                                         == kd::PatcherState::Installed);

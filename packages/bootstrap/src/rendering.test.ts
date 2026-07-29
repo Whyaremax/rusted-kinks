@@ -46,6 +46,7 @@ describe("Kinky Dungeon rendering integration", () => {
       },
       sampleTextureMemory: () => undefined,
       setTier: () => undefined,
+      setFramePacingMode: () => undefined,
       dispose: () => undefined
     };
     const target = {

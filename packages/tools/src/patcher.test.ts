@@ -175,7 +175,7 @@ describe("reversible patcher", () => {
     );
     await writeFile(pendingPath, "{}");
     expect(await status(fixture.appRoot)).toMatchObject({
-      state: "modified",
+      state: "incomplete",
       problems: ["pending installation manifest exists"]
     });
     await rm(pendingPath);
