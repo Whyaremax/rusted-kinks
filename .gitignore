@@ -21,6 +21,13 @@ scratch/
 tmp/
 temp/
 
+# Local development documentation
+docs/COMPATIBILITY.md
+docs/COMPATIBILITY_CLEANUP.md
+docs/DEVELOPER_HARNESS.md
+docs/LOCAL_TESTING.md
+docs/REMOTE_TESTING.md
+
 # Local configuration, secrets, and session state
 .env
 .env.*
