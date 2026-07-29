@@ -366,7 +366,7 @@ A stable release needs:
 - Linux x86_64 and ARM64 packages;
 - install, status, configure, and uninstall flows tested on clean copies;
 - the user-facing mod preflight, fallback choices, and remembered-decision
-  controls in [COMPATIBILITY_CLEANUP.md](COMPATIBILITY_CLEANUP.md);
+  controls;
 - no game binaries, assets, or saves in the repository or release;
 - MPL source and notices shipped beside adapted files;
 - an upgrade path between KD Hybrid versions; and

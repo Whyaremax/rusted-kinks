@@ -265,9 +265,7 @@ original function, and slower ideas get left in the lab.
 ### Can I test it from another computer or phone?
 
 Yes. The isolated test copy has a tokenized browser server and a persistent
-asset cache, so a slow connection pays most of the download cost once. See
-[Remote browser testing](docs/REMOTE_TESTING.md) for the launch command and
-private-network setup.
+asset cache, so a slow connection pays most of the download cost once.
 
 ### How do I remove it?
 
@@ -301,12 +299,9 @@ and any useful logs. If you already know the fix, PRs are cool too.
 Useful project notes:
 
 - [Architecture](docs/ARCHITECTURE.md)
-- [Compatibility model](docs/COMPATIBILITY.md)
 - [Mod SDK and ABI-1 examples](docs/MOD_SDK.md)
-- [Pre-stable mod compatibility cleanup](docs/COMPATIBILITY_CLEANUP.md)
 - [Performance results](docs/PERFORMANCE.md)
-- [Local testing](docs/LOCAL_TESTING.md)
-- [Remote browser testing](docs/REMOTE_TESTING.md)
+- [Roadmap](docs/ROADMAP.md)
 - [Save and installation safety](docs/SAFETY.md)
 
 ## License and credit
