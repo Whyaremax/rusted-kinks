@@ -15,9 +15,9 @@ while letting the expensive parts move somewhere faster.
 ## Where it is now
 
 This is early alpha, but it is not vaporware. The build, patching, fallback,
-testing, and remote-play pipelines are alive. The current source includes the
-accepted pathfinding, crowded-turn, map-generation, texture, and compatibility
-work described below.
+and testing pipelines are alive. The current source includes the accepted
+pathfinding, crowded-turn, map-generation, texture, and compatibility work
+described below.
 
 What exists today: (yaps) [installation](https://github.com/Whyaremax/rusted-kinks/tree/main#installing-a-release)
 
@@ -47,11 +47,9 @@ What exists today: (yaps) [installation](https://github.com/Whyaremax/rusted-kin
 - an exact-build-gated texture policy that selects KD's official mobile atlas
   on the balanced tier, reports decoded texture memory, and preserves full and
   original escape hatches without changing Pixi's loader;
-- compatibility fallbacks for calls the native path cannot safely handle; and
+- compatibility fallbacks for calls the native path cannot safely handle;
 - pathfinding stress and paired crowded-turn tests against the real KD Electron
-  build;
-- a private remote-browser test server with tokenized access and a
-  download-once asset cache; and
+  build; and
 - a capability-gated WASM plugin host ready for the mod SDK to grow into.
 
 In a focused KD 5.4.92 benchmark, the pathfinding adapter ran the tested path
@@ -262,11 +260,6 @@ measured crowded-turn and map-generation wins. Frame time, startup, and memory
 are the next places to collect gains. Each fast path is compared with the
 original function, and slower ideas get left in the lab.
 
-### Can I test it from another computer or phone?
-
-Yes. The isolated test copy has a tokenized browser server and a persistent
-asset cache, so a slow connection pays most of the download cost once.
-
 ### How do I remove it?
 
 Use **Uninstall** in the manager, or run the generated PowerShell patcher with
@@ -283,7 +276,7 @@ The short version:
 2. migrate deeper movement, broader AI, combat, buffs, and event batching in
    useful slices;
 3. build capture, prison, map-generation, and long-run fixtures;
-4. improve startup, asset loading, and remote-play caching;
+4. improve startup and asset loading;
 5. make the mod SDK pleasant enough that other people can extend the native
    side without forking everything; and
 6. ship a stable manager and release package that people can undo just as
