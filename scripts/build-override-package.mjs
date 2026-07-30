@@ -14,6 +14,8 @@ import path from "node:path";
 
 import { zipSync } from "fflate";
 
+const zipMtime = new Date(1980, 0, 1, 0, 0, 0);
+
 import { install, KNOWN_BUNDLES } from "../packages/tools/dist/patcher.js";
 
 const root = path.resolve(import.meta.dirname, "..");
@@ -51,13 +53,16 @@ const temporaryRoot = await mkdtemp(
   path.join(tmpdir(), "kd-hybrid-override-"),
 );
 const stagedApp = path.join(temporaryRoot, "staged", "resources", "app");
+const stagedMods = path.join(temporaryRoot, "staged", "Mods");
 const releaseRoot = path.join(temporaryRoot, "release");
 const releaseApp = path.join(releaseRoot, "resources", "app");
+const releaseMods = path.join(releaseRoot, "Mods");
 
 try {
   await Promise.all([
     mkdir(path.join(stagedApp, "out"), { recursive: true }),
     mkdir(path.join(releaseApp, "out"), { recursive: true }),
+    mkdir(releaseMods, { recursive: true }),
   ]);
   await Promise.all([
     cp(sourceIndex, path.join(stagedApp, "index.html")),
@@ -86,6 +91,10 @@ try {
     cp(path.join(stagedApp, "kd-hybrid"), path.join(releaseApp, "kd-hybrid"), {
       recursive: true,
     }),
+    cp(
+      path.join(stagedMods, "KDHybridBridge.zip"),
+      path.join(releaseMods, "KDHybridBridge.zip"),
+    ),
   ]);
 
   const files = await collectFiles(releaseRoot);
@@ -107,7 +116,7 @@ try {
       await readFile(file);
   }
   await mkdir(path.dirname(outputPath), { recursive: true });
-  await writeFile(outputPath, zipSync(archive, { level: 9 }));
+  await writeFile(outputPath, zipSync(archive, { level: 9, mtime: zipMtime }));
   await writeFile(
     `${outputPath}.sha256.txt`,
     `${await sha256File(outputPath)}  ${path.basename(outputPath)}\n`,
@@ -204,9 +213,15 @@ async function auditOverride(files, releaseRootPath, original) {
   );
   if (
     relations.length === 0 ||
-    relations.some((relative) => !relative.startsWith("resources/"))
+    relations.some(
+      (relative) =>
+        !relative.startsWith("resources/") &&
+        relative !== "Mods/KDHybridBridge.zip",
+    )
   ) {
-    throw new Error("Manual package must contain only the resources tree");
+    throw new Error(
+      "Manual package must contain only the resources tree and KD Hybrid bridge mod",
+    );
   }
   const required = [
     "resources/app/index.html",
@@ -216,6 +231,7 @@ async function auditOverride(files, releaseRootPath, original) {
     "resources/app/kd-hybrid/LICENSES/MIT.txt",
     "resources/app/kd-hybrid/LICENSES/MPL-2.0.txt",
     "resources/app/kd-hybrid/SOURCE.txt",
+    "Mods/KDHybridBridge.zip",
   ];
   for (const relative of required) {
     if (!relations.includes(relative)) {

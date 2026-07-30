@@ -13,6 +13,7 @@ find_package(Qt6 6.2 REQUIRED COMPONENTS Core Widgets)
 set(KD_REPOSITORY_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
 set(KD_BOOTSTRAP_ROOT "${KD_REPOSITORY_ROOT}/dist/bootstrap")
 set(KD_BOOTSTRAP_FILES
+    "${KD_BOOTSTRAP_ROOT}/KDHybridBridge.zip"
     "${KD_BOOTSTRAP_ROOT}/kd-hybrid-bootstrap.js"
     "${KD_BOOTSTRAP_ROOT}/kd-hybrid-bootstrap.js.map"
     "${KD_BOOTSTRAP_ROOT}/NOTICE.txt"

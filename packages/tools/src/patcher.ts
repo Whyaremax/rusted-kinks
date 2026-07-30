@@ -24,6 +24,8 @@ export const KNOWN_BUNDLES = Object.freeze({
 });
 
 export const BOOTSTRAP_SCRIPT_PATH = "kd-hybrid/kd-hybrid-bootstrap.js";
+export const BRIDGE_MOD_FILE_NAME = "KDHybridBridge.zip";
+export const BRIDGE_MOD_RELATIVE_PATH = `Mods/${BRIDGE_MOD_FILE_NAME}` as const;
 export type PatcherPathfindingMode = "quality" | "fast" | "human";
 export type PatcherTextureMode = "auto" | "original" | "full" | "mobile";
 
@@ -62,6 +64,9 @@ export interface InstallationManifest {
     readonly sourceUrl: string;
   };
   readonly files: readonly InstalledFile[];
+  readonly modBridge?: InstalledFile & {
+    readonly path: typeof BRIDGE_MOD_RELATIVE_PATH;
+  };
   readonly settings?: {
     readonly pathfindingMode: PatcherPathfindingMode;
     readonly textureMode?: PatcherTextureMode;
@@ -102,20 +107,42 @@ export async function install(options: InstallOptions): Promise<PatcherStatus> {
   const textureMode = validateTextureMode(options.textureMode ?? "auto");
   const appRoot = resolve(options.appRoot);
   await validateLayout(appRoot);
+  const payloadRoot = resolve(options.payloadRoot);
+  const payloadFiles = await listPayloadFiles(payloadRoot);
+  if (!payloadFiles.some((entry) => entry.relativePath === "kd-hybrid-bootstrap.js")) {
+    throw new Error("Payload is missing kd-hybrid-bootstrap.js");
+  }
+  const bridgePayload = payloadFiles.find(
+    (entry) => entry.relativePath === BRIDGE_MOD_FILE_NAME
+  );
+  if (bridgePayload === undefined) {
+    throw new Error(`Payload is missing ${BRIDGE_MOD_FILE_NAME}`);
+  }
   const existing = await status(appRoot);
-  if (existing.state === "installed") {
-    return existing;
+  if (existing.state === "installed" && existing.manifest !== null) {
+    if (
+      installationMatchesPayload(
+        existing.manifest,
+        payloadFiles,
+        bridgePayload,
+        options.toolVersion
+      )
+    ) {
+      return existing;
+    }
+    return upgradeInstalledPayload(
+      appRoot,
+      payloadRoot,
+      payloadFiles,
+      bridgePayload,
+      options.toolVersion,
+      existing.manifest
+    );
   }
   if (existing.state !== "not-installed") {
     throw new Error(
       `Refusing install over ${existing.state} patcher state: ${existing.problems.join("; ")}`
     );
-  }
-
-  const payloadRoot = resolve(options.payloadRoot);
-  const payloadFiles = await listPayloadFiles(payloadRoot);
-  if (!payloadFiles.some((entry) => entry.relativePath === "kd-hybrid-bootstrap.js")) {
-    throw new Error("Payload is missing kd-hybrid-bootstrap.js");
   }
 
   const bundlePath = resolveInside(appRoot, "out/main.js");
@@ -191,8 +218,10 @@ export async function install(options: InstallOptions): Promise<PatcherStatus> {
   const bundleBackupRelative = `${STATE_DIR}/backups/${id}/out-main.js`;
   const bundleBackupPath = resolveInside(appRoot, bundleBackupRelative);
   const destinationRoot = resolveInside(appRoot, DESTINATION_DIR);
+  const bridgeModPath = resolveBridgeModPath(appRoot);
   assertExactChild(appRoot, destinationRoot, DESTINATION_DIR);
   await ensureAbsent(destinationRoot);
+  await ensureAbsent(bridgeModPath);
   await mkdir(dirname(backupPath), { recursive: true });
   await writeFileExclusive(backupPath, originalIndex);
   if (sourcePatchResult !== null) {
@@ -240,6 +269,11 @@ export async function install(options: InstallOptions): Promise<PatcherStatus> {
           }
         }),
     files: installedFiles,
+    modBridge: {
+      path: BRIDGE_MOD_RELATIVE_PATH,
+      sha256: bridgePayload.sha256,
+      bytes: bridgePayload.bytes
+    },
     settings: {
       pathfindingMode,
       textureMode
@@ -250,6 +284,8 @@ export async function install(options: InstallOptions): Promise<PatcherStatus> {
   await atomicWriteJson(resolveInside(appRoot, PENDING_PATH), manifest);
   try {
     await copyPayload(payloadRoot, destinationRoot, payloadFiles);
+    await mkdir(dirname(bridgeModPath), { recursive: true });
+    await copyVerifiedFile(bridgePayload.sourcePath, bridgeModPath, bridgePayload.sha256);
     if (patchedBundle !== null) {
       await atomicWrite(bundlePath, patchedBundle);
     }
@@ -404,6 +440,14 @@ export async function status(appRootInput: string): Promise<PatcherStatus> {
       problems.push(`${file.path} was modified`);
     }
   }
+  if (manifest.modBridge !== undefined) {
+    const bridgeModPath = resolveBridgeModPath(appRoot, manifest.modBridge.path);
+    if (!(await exists(bridgeModPath))) {
+      problems.push(`${manifest.modBridge.path} is missing`);
+    } else if ((await sha256File(bridgeModPath)) !== manifest.modBridge.sha256) {
+      problems.push(`${manifest.modBridge.path} was modified`);
+    }
+  }
   const expectedBundleSha256 =
     manifest.sourcePatch?.patchedSha256 ?? manifest.upstream.bundleSha256;
   if (
@@ -463,6 +507,11 @@ export async function uninstall(appRootInput: string): Promise<PatcherStatus> {
   const destinationRoot = resolveInside(appRoot, DESTINATION_DIR);
   assertExactChild(appRoot, destinationRoot, DESTINATION_DIR);
   await rm(destinationRoot, { recursive: true, force: true });
+  if (manifest.modBridge !== undefined) {
+    await rm(resolveBridgeModPath(appRoot, manifest.modBridge.path), {
+      force: true
+    });
+  }
 
   const historyPath = resolveInside(
     appRoot,
@@ -595,6 +644,156 @@ async function copyPayload(
   }
 }
 
+function installationMatchesPayload(
+  manifest: InstallationManifest,
+  payloadFiles: readonly PayloadFile[],
+  bridgePayload: PayloadFile,
+  toolVersion: string
+): boolean {
+  if (
+    manifest.toolVersion !== toolVersion ||
+    manifest.modBridge?.path !== BRIDGE_MOD_RELATIVE_PATH ||
+    manifest.modBridge.sha256 !== bridgePayload.sha256 ||
+    manifest.modBridge.bytes !== bridgePayload.bytes ||
+    manifest.files.length !== payloadFiles.length
+  ) {
+    return false;
+  }
+  const installed = new Map(manifest.files.map((file) => [file.path, file]));
+  return payloadFiles.every((payload) => {
+    const record = installed.get(
+      portablePath(`${DESTINATION_DIR}/${payload.relativePath}`)
+    );
+    return record?.sha256 === payload.sha256 && record.bytes === payload.bytes;
+  });
+}
+
+async function upgradeInstalledPayload(
+  appRoot: string,
+  payloadRoot: string,
+  payloadFiles: readonly PayloadFile[],
+  bridgePayload: PayloadFile,
+  toolVersion: string,
+  currentManifest: InstallationManifest
+): Promise<PatcherStatus> {
+  const destinationRoot = resolveInside(appRoot, DESTINATION_DIR);
+  assertExactChild(appRoot, destinationRoot, DESTINATION_DIR);
+  const bridgeModPath = resolveBridgeModPath(appRoot);
+  if (
+    currentManifest.modBridge === undefined &&
+    (await exists(bridgeModPath))
+  ) {
+    throw new Error(`Destination already exists: ${bridgeModPath}`);
+  }
+
+  const previousManifestPath = resolveInside(appRoot, MANIFEST_PATH);
+  const previousManifestBytes = await readFile(previousManifestPath);
+  const previousFiles = new Map<string, Buffer>();
+  for (const file of currentManifest.files) {
+    previousFiles.set(file.path, await readFile(resolveInside(appRoot, file.path)));
+  }
+  const previousBridge =
+    currentManifest.modBridge === undefined
+      ? null
+      : await readFile(
+          resolveBridgeModPath(appRoot, currentManifest.modBridge.path)
+        );
+  const desiredPaths = new Set(
+    payloadFiles.map((file) =>
+      portablePath(`${DESTINATION_DIR}/${file.relativePath}`)
+    )
+  );
+  const updatedManifest: InstallationManifest = {
+    ...currentManifest,
+    toolVersion,
+    files: payloadFiles.map((file) => ({
+      path: portablePath(`${DESTINATION_DIR}/${file.relativePath}`),
+      sha256: file.sha256,
+      bytes: file.bytes
+    })),
+    modBridge: {
+      path: BRIDGE_MOD_RELATIVE_PATH,
+      sha256: bridgePayload.sha256,
+      bytes: bridgePayload.bytes
+    }
+  };
+  const pendingPath = resolveInside(appRoot, PENDING_PATH);
+  await atomicWriteJson(pendingPath, updatedManifest);
+  try {
+    for (const file of payloadFiles) {
+      const source = resolveInside(payloadRoot, file.relativePath);
+      if (resolve(source) !== resolve(file.sourcePath)) {
+        throw new Error(`Payload changed during upgrade: ${file.relativePath}`);
+      }
+      const bytes = await readFile(source);
+      if (sha256Bytes(bytes) !== file.sha256) {
+        throw new Error(`Payload changed during upgrade: ${file.relativePath}`);
+      }
+      await atomicWrite(
+        resolveInside(
+          destinationRoot,
+          portablePath(file.relativePath)
+        ),
+        bytes
+      );
+    }
+    for (const file of currentManifest.files) {
+      if (!desiredPaths.has(file.path)) {
+        await rm(resolveInside(appRoot, file.path), { force: true });
+      }
+    }
+    const bridgeBytes = await readFile(bridgePayload.sourcePath);
+    if (sha256Bytes(bridgeBytes) !== bridgePayload.sha256) {
+      throw new Error(`Payload changed during upgrade: ${BRIDGE_MOD_FILE_NAME}`);
+    }
+    await atomicWrite(bridgeModPath, bridgeBytes);
+    await atomicWriteJson(previousManifestPath, updatedManifest);
+    await rm(pendingPath, { force: true });
+  } catch (error) {
+    try {
+      for (const file of payloadFiles) {
+        const path = portablePath(
+          `${DESTINATION_DIR}/${file.relativePath}`
+        );
+        const previous = previousFiles.get(path);
+        const destination = resolveInside(appRoot, path);
+        if (previous === undefined) {
+          await rm(destination, { force: true });
+        } else {
+          await atomicWrite(destination, previous);
+        }
+      }
+      for (const [path, bytes] of previousFiles) {
+        if (!desiredPaths.has(path)) {
+          await atomicWrite(resolveInside(appRoot, path), bytes);
+        }
+      }
+      if (previousBridge === null) {
+        await rm(bridgeModPath, { force: true });
+      } else {
+        await atomicWrite(bridgeModPath, previousBridge);
+      }
+      await atomicWrite(previousManifestPath, previousManifestBytes);
+      await rm(pendingPath, { force: true });
+    } catch {
+      // Preserve the pending journal when rollback itself cannot finish.
+    }
+    throw error;
+  }
+  return status(appRoot);
+}
+
+async function copyVerifiedFile(
+  source: string,
+  destination: string,
+  expectedSha256: string
+): Promise<void> {
+  await copyFile(source, destination);
+  if ((await sha256File(destination)) !== expectedSha256) {
+    throw new Error(`Copied file hash mismatch: ${destination}`);
+  }
+}
+
 async function atomicWrite(path: string, bytes: Uint8Array): Promise<void> {
   const temp = join(dirname(path), `.${basename(path)}.${randomUUID()}.tmp`);
   await writeFile(temp, bytes, { flag: "wx" });
@@ -639,7 +838,43 @@ async function readManifest(path: string): Promise<InstallationManifest> {
     resolveInside(dirname(dirname(path)), parsed.sourcePatch.path);
     resolveInside(dirname(dirname(path)), parsed.sourcePatch.backupPath);
   }
+  if (parsed.modBridge !== undefined) {
+    if (
+      parsed.modBridge.path !== BRIDGE_MOD_RELATIVE_PATH ||
+      typeof parsed.modBridge.sha256 !== "string" ||
+      typeof parsed.modBridge.bytes !== "number"
+    ) {
+      throw new Error("Invalid KD Hybrid bridge mod in installation manifest");
+    }
+    resolveBridgeModPath(dirname(dirname(path)), parsed.modBridge.path);
+  }
   return parsed as InstallationManifest;
+}
+
+function resolveBridgeModPath(
+  appRoot: string,
+  relativePath: string = BRIDGE_MOD_RELATIVE_PATH
+): string {
+  if (relativePath !== BRIDGE_MOD_RELATIVE_PATH) {
+    throw new Error(`Unexpected KD Hybrid bridge mod path: ${relativePath}`);
+  }
+  const normalizedAppRoot = resolve(appRoot);
+  const resourcesRoot = dirname(normalizedAppRoot);
+  if (
+    basename(normalizedAppRoot).toLowerCase() !== "app" ||
+    basename(resourcesRoot).toLowerCase() !== "resources"
+  ) {
+    throw new Error(
+      `KD Hybrid bridge mod requires a resources/app layout: ${appRoot}`
+    );
+  }
+  const gameRoot = dirname(resourcesRoot);
+  const modsRoot = join(gameRoot, "Mods");
+  const target = join(modsRoot, BRIDGE_MOD_FILE_NAME);
+  if (dirname(target) !== modsRoot || basename(target) !== BRIDGE_MOD_FILE_NAME) {
+    throw new Error(`Unsafe KD Hybrid bridge mod target: ${target}`);
+  }
+  return target;
 }
 
 async function ensureAbsent(path: string): Promise<void> {

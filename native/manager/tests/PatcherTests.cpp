@@ -31,12 +31,15 @@ QByteArray readFile(const QString& path)
 struct Fixture {
     QTemporaryDir root;
     QString appRoot;
+    QString bridgeMod;
     QString saveSentinel;
 
     Fixture()
     {
         QVERIFY(root.isValid());
         appRoot = QDir(root.path()).filePath(QStringLiteral("game/resources/app"));
+        bridgeMod = QDir(root.path()).filePath(
+            QStringLiteral("game/Mods/KDHybridBridge.zip"));
         saveSentinel =
             QDir(root.path()).filePath(QStringLiteral("userData/profile.sav"));
         writeFile(QDir(appRoot).filePath(QStringLiteral("index.html")),
@@ -95,6 +98,13 @@ private slots:
                     .toArray()
                     .size()
                 >= 10);
+        QCOMPARE(installed.manifest.value(QStringLiteral("modBridge"))
+                     .toObject()
+                     .value(QStringLiteral("path"))
+                     .toString(),
+                 QStringLiteral("Mods/KDHybridBridge.zip"));
+        QVERIFY(QFileInfo::exists(fixture.bridgeMod));
+        QVERIFY(!readFile(fixture.bridgeMod).isEmpty());
 
         QFile index(fixture.appRoot + QStringLiteral("/index.html"));
         QVERIFY(index.open(QIODevice::ReadOnly));
@@ -108,6 +118,7 @@ private slots:
             QFAIL(error.what());
         }
         QCOMPARE(removed.state, kd::PatcherState::NotInstalled);
+        QVERIFY(!QFileInfo::exists(fixture.bridgeMod));
         QFile restored(fixture.appRoot + QStringLiteral("/index.html"));
         QVERIFY(restored.open(QIODevice::ReadOnly));
         QCOMPARE(restored.readAll(), original);
@@ -238,6 +249,86 @@ private slots:
                  kd::PatcherState::Modified);
         QVERIFY_EXCEPTION_THROWN(kd::Patcher::uninstall(fixture.appRoot),
                                  std::runtime_error);
+    }
+
+    void upgradesVerifiedPreBridgeInstallationInPlace()
+    {
+        Fixture fixture;
+        kd::PatcherStatus installed;
+        try {
+            installed = kd::Patcher::install(fixture.appRoot, true);
+        } catch (const std::exception& error) {
+            QFAIL(error.what());
+        }
+        const QString manifestPath = QDir(fixture.appRoot).filePath(
+            QStringLiteral(".kd-hybrid/installation.json"));
+        QJsonObject legacy =
+            QJsonDocument::fromJson(readFile(manifestPath)).object();
+        legacy.remove(QStringLiteral("modBridge"));
+        QJsonArray legacyFiles;
+        for (const QJsonValue& value :
+             legacy.value(QStringLiteral("files")).toArray()) {
+            if (value.toObject().value(QStringLiteral("path")).toString()
+                != QStringLiteral("kd-hybrid/KDHybridBridge.zip")) {
+                legacyFiles.append(value);
+            }
+        }
+        legacy.insert(QStringLiteral("files"), legacyFiles);
+        writeFile(manifestPath,
+                  QJsonDocument(legacy).toJson(QJsonDocument::Indented));
+        QVERIFY(QFile::remove(QDir(fixture.appRoot).filePath(
+            QStringLiteral("kd-hybrid/KDHybridBridge.zip"))));
+        QVERIFY(QFile::remove(fixture.bridgeMod));
+
+        const kd::PatcherStatus outdated =
+            kd::Patcher::status(fixture.appRoot);
+        QCOMPARE(outdated.state, kd::PatcherState::Installed);
+        QVERIFY(outdated.upgradeAvailable);
+
+        kd::PatcherStatus upgraded;
+        try {
+            upgraded = kd::Patcher::install(fixture.appRoot, true);
+        } catch (const std::exception& error) {
+            QFAIL(error.what());
+        }
+        QCOMPARE(upgraded.state, kd::PatcherState::Installed);
+        QVERIFY(!upgraded.upgradeAvailable);
+        QVERIFY(QFileInfo::exists(fixture.bridgeMod));
+        QCOMPARE(upgraded.manifest.value(QStringLiteral("index"))
+                     .toObject()
+                     .value(QStringLiteral("backupPath")),
+                 installed.manifest.value(QStringLiteral("index"))
+                     .toObject()
+                     .value(QStringLiteral("backupPath")));
+    }
+
+    void refusesToOverwriteUserBridgeMod()
+    {
+        Fixture fixture;
+        writeFile(fixture.bridgeMod, "user mod");
+        QVERIFY_EXCEPTION_THROWN(
+            kd::Patcher::install(fixture.appRoot, true),
+            std::runtime_error);
+        QCOMPARE(readFile(fixture.bridgeMod), QByteArray("user mod"));
+    }
+
+    void refusesToRemoveModifiedBridgeMod()
+    {
+        Fixture fixture;
+        try {
+            kd::Patcher::install(fixture.appRoot, true);
+        } catch (const std::exception& error) {
+            QFAIL(error.what());
+        }
+        writeFile(fixture.bridgeMod, "modified");
+        const kd::PatcherStatus current =
+            kd::Patcher::status(fixture.appRoot);
+        QCOMPARE(current.state, kd::PatcherState::Modified);
+        QVERIFY(current.problems.contains(
+            QStringLiteral("Mods/KDHybridBridge.zip was modified")));
+        QVERIFY_EXCEPTION_THROWN(kd::Patcher::uninstall(fixture.appRoot),
+                                 std::runtime_error);
+        QCOMPARE(readFile(fixture.bridgeMod), QByteArray("modified"));
     }
 };
 

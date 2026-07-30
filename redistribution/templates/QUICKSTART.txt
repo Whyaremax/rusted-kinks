@@ -32,10 +32,12 @@ It changes resources/app/index.html and, on the exact supported build,
 resources/app/out/main.js. It writes its own files under
 resources/app/kd-hybrid and keeps byte-exact backups plus the installation
 manifest under resources/app/.kd-hybrid. Uninstall verifies and restores both
-original files.
+original files. It also installs one owned Mods/KDHybridBridge.zip file so KD
+can display Hybrid in its normal mod list and configuration screen. Uninstall
+verifies that file before removing it.
 
-Normal mods are intentionally not managed by this patcher. Install those with
-Kinky Dungeon's existing mod workflow.
+Every other mod is intentionally left alone. Install those with Kinky
+Dungeon's existing mod workflow.
 
 LICENSES
 

@@ -43,6 +43,7 @@ struct PatcherStatus {
     Inspection inspection;
     QJsonObject manifest;
     QStringList problems;
+    bool upgradeAvailable = false;
 };
 
 class Patcher final {

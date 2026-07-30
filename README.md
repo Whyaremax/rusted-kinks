@@ -53,6 +53,8 @@ What exists today: (yaps) [installation](https://github.com/Whyaremax/rusted-kin
 - compatibility fallbacks for calls the native path cannot safely handle;
 - content-inspected compatibility for normal mods that stay within recognized
   official KD APIs, with source-replacing or dynamic mods kept on JavaScript;
+- a genuine KD control mod that appears in KD's own mod list and configuration
+  screen, then forwards only validated Hybrid settings to the early host;
 - pathfinding stress and paired crowded-turn tests against the real KD Electron
   build; and
 - a capability-gated WASM plugin host ready for the mod SDK to grow into.
@@ -126,8 +128,9 @@ manager or setup archive:
 4. Install the bootstrap and launch the game normally.
 
 Voilà. The manager checks the exact game bundle, backs up `index.html` and
-`out/main.js`, and can restore both later. It does not include Kinky Dungeon
-itself or take over ordinary mod management.
+`out/main.js`, installs its own small `Mods/KDHybridBridge.zip` control mod, and
+can restore all three later. It does not include Kinky Dungeon or manage any
+other mod.
 
 If the Releases page is empty or behind the source, build the installer kit
 yourself.
@@ -169,7 +172,7 @@ Here is what the useful commands make:
 | `npm run build` | The Rust/WASM core and JavaScript bootstrap under `dist/` |
 | `npm run package` | A portable bootstrap ZIP at `artifacts/kd-hybrid.zip` |
 | `npm run redistribute` | An unpacked patcher kit, setup ZIP, and checksums under `redistribution/releases/` |
-| `npm run package:override -- --app-root <game>` | A ready-to-copy `resources/app/...` override ZIP with no clean KD backup |
+| `npm run package:override -- --app-root <game>` | A ready-to-copy game-folder override ZIP with patched `resources/app/...` files and the control mod |
 | `npm run verify:textures -- --app-root <resources/app>` | Official full/mobile atlas coverage, geometry, and decoded-byte report |
 | `npm run verify:frame-pacing -- --port <cdp-port>` | Live control/candidate GPU-command, cadence, pixel, activity, and render-texture gate |
 
@@ -198,9 +201,15 @@ If you only want the portable bootstrap payload for development, run
 For a command-free manual override, run `npm run package:override` with a clean
 KD 5.4.92 installation. The ZIP directly contains patched
 `resources/app/index.html`, patched `resources/app/out/main.js`, and
-`resources/app/kd-hybrid/...`; users can merge that `resources` folder over an
-ordinary unmodified install. It deliberately contains no clean backup or
-`RESTORE` tree.
+`resources/app/kd-hybrid/...`, plus `Mods/KDHybridBridge.zip`; users can merge
+its `resources` and `Mods` folders over an ordinary unmodified install. The ZIP
+deliberately contains no clean backup or `RESTORE` tree.
+
+The control ZIP is a normal KD mod. KD discovers it through its existing mod
+loader and renders its pathfinding, texture, and frame-pacing options through
+the standard mod configuration screen. Its script can call only the small
+`KDHybridModBridge` settings API exposed by the early bootstrap; it does not
+replace KD's mod menu. Texture changes take effect after restarting the game.
 
 The source patcher CLI accepts `--texture-mode auto|original|full|mobile` on
 `install` and `configure`. `auto` uses the memory-safe official mobile atlas
@@ -247,12 +256,14 @@ ship the complete upstream source tree, game executable, art, audio, or saves.
 
 That is one of the main reasons this stays hybrid. Existing mods can keep using
 JavaScript. If a mod replaces a function or uses arguments the native adapter
-does not support, that call stays on the original JavaScript path.
+does not support, that call stays on the original JavaScript path. The manager
+installs only KD Hybrid's own control ZIP and leaves every other mod alone.
 
 ### Does this touch my saves?
 
-No. The patcher works inside the selected `resources/app` directory; it does
-not open Electron's save/profile directory. Development tests use a separate
+No. The patcher changes its verified files under `resources/app` and owns one
+exact `Mods/KDHybridBridge.zip` file beside the game. It does not open
+Electron's save/profile directory. Development tests use a separate
 `user-data` folder too.
 
 ### Is this a full native rewrite?
@@ -288,7 +299,8 @@ original function, and slower ideas get left in the lab.
 Use **Uninstall** in the manager, or run the generated PowerShell patcher with
 `-Action Uninstall`. The installer keeps byte-exact backups of the original
 `index.html` and any patched `out/main.js`, then verifies them before restoring
-either file.
+either file. It also verifies and removes its own control-mod ZIP. A changed or
+replaced bridge ZIP is refused rather than deleted.
 
 ## Roadmap
 

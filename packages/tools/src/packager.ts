@@ -13,6 +13,7 @@ export interface PackageOptions {
 
 const MAX_FILE_BYTES = 64 * 1024 * 1024;
 const MAX_ARCHIVE_INPUT_BYTES = 128 * 1024 * 1024;
+const ZIP_MTIME = new Date(1980, 0, 1, 0, 0, 0);
 const REQUIRED_PAYLOAD_FILES = [
   "KDHybrid.js",
   "wasm/kd_hybrid_core_bg.wasm",
@@ -76,7 +77,7 @@ export async function packagePortableMod(options: PackageOptions): Promise<strin
   for (const file of files) {
     archive[file.path] = await readFile(file.source);
   }
-  const zipped = zipSync(archive, { level: 9 });
+  const zipped = zipSync(archive, { level: 9, mtime: ZIP_MTIME });
   const output = resolve(options.output);
   await mkdir(dirname(output), { recursive: true });
   await writeFile(output, zipped, { flag: "w" });

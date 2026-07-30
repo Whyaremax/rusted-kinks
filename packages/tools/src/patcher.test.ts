@@ -7,7 +7,7 @@ import {
   writeFile
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -57,11 +57,24 @@ describe("reversible patcher", () => {
     expect(await readFile(join(fixture.appRoot, "index.html"), "utf8")).toContain(
       "kd-hybrid/kd-hybrid-bootstrap.js"
     );
+    expect(first.manifest?.modBridge).toMatchObject({
+      path: "Mods/KDHybridBridge.zip",
+      bytes: 4
+    });
+    expect(
+      await readFile(
+        join(dirname(dirname(fixture.appRoot)), "Mods", "KDHybridBridge.zip"),
+        "utf8"
+      )
+    ).toBe("test");
     expect(await readFile(fixture.saveSentinel, "utf8")).toBe("do-not-touch");
 
     const removed = await uninstall(fixture.appRoot);
     expect(removed.state).toBe("not-installed");
     expect(await readFile(join(fixture.appRoot, "index.html"))).toEqual(original);
+    await expect(
+      stat(join(dirname(dirname(fixture.appRoot)), "Mods", "KDHybridBridge.zip"))
+    ).rejects.toThrow();
     expect(await readFile(fixture.saveSentinel, "utf8")).toBe("do-not-touch");
     expect(
       (await stat(join(fixture.appRoot, ".kd-hybrid", "uninstalled"))).isDirectory()
@@ -94,6 +107,121 @@ describe("reversible patcher", () => {
     );
     expect((await status(fixture.appRoot)).state).toBe("modified");
     await expect(uninstall(fixture.appRoot)).rejects.toThrow(/changed/u);
+  });
+
+  it("refuses to overwrite or remove a user-owned bridge mod", async () => {
+    const fixture = await createFixture();
+    const bridgePath = join(
+      dirname(dirname(fixture.appRoot)),
+      "Mods",
+      "KDHybridBridge.zip"
+    );
+    await mkdir(dirname(bridgePath), { recursive: true });
+    await writeFile(bridgePath, "user mod");
+
+    await expect(
+      install({
+        appRoot: fixture.appRoot,
+        payloadRoot: fixture.payloadRoot,
+        toolVersion: "test",
+        allowUnknownBundle: true
+      })
+    ).rejects.toThrow(/already exists/u);
+    expect(await readFile(bridgePath, "utf8")).toBe("user mod");
+  });
+
+  it("detects a modified installed bridge before uninstall", async () => {
+    const fixture = await createFixture();
+    await install({
+      appRoot: fixture.appRoot,
+      payloadRoot: fixture.payloadRoot,
+      toolVersion: "test",
+      allowUnknownBundle: true
+    });
+    const bridgePath = join(
+      dirname(dirname(fixture.appRoot)),
+      "Mods",
+      "KDHybridBridge.zip"
+    );
+    await writeFile(bridgePath, "modified");
+
+    expect(await status(fixture.appRoot)).toMatchObject({
+      state: "modified",
+      problems: ["Mods/KDHybridBridge.zip was modified"]
+    });
+    await expect(uninstall(fixture.appRoot)).rejects.toThrow(/changed/u);
+    expect(await readFile(bridgePath, "utf8")).toBe("modified");
+  });
+
+  it("upgrades a verified pre-bridge installation in place", async () => {
+    const fixture = await createFixture();
+    const originalIndex = await readFile(join(fixture.appRoot, "index.html"));
+    const installed = await install({
+      appRoot: fixture.appRoot,
+      payloadRoot: fixture.payloadRoot,
+      toolVersion: "old",
+      allowUnknownBundle: true
+    });
+    const manifestPath = join(
+      fixture.appRoot,
+      ".kd-hybrid",
+      "installation.json"
+    );
+    const legacy = JSON.parse(
+      await readFile(manifestPath, "utf8")
+    ) as Record<string, unknown> & {
+      files: Array<{ path: string }>;
+    };
+    delete legacy.modBridge;
+    legacy.files = legacy.files.filter(
+      (file) => file.path !== "kd-hybrid/KDHybridBridge.zip"
+    );
+    await writeFile(manifestPath, `${JSON.stringify(legacy, null, 2)}\n`);
+    await rm(
+      join(fixture.appRoot, "kd-hybrid", "KDHybridBridge.zip")
+    );
+    await rm(
+      join(dirname(dirname(fixture.appRoot)), "Mods", "KDHybridBridge.zip")
+    );
+    expect((await status(fixture.appRoot)).state).toBe("installed");
+
+    await writeFile(
+      join(fixture.payloadRoot, "kd-hybrid-bootstrap.js"),
+      "globalThis.fixture = 'upgraded';\n"
+    );
+    await writeFile(join(fixture.payloadRoot, "KDHybridBridge.zip"), "new bridge");
+    const upgraded = await install({
+      appRoot: fixture.appRoot,
+      payloadRoot: fixture.payloadRoot,
+      toolVersion: "new",
+      allowUnknownBundle: true
+    });
+
+    expect(upgraded.state).toBe("installed");
+    expect(upgraded.manifest?.toolVersion).toBe("new");
+    expect(upgraded.manifest?.modBridge?.path).toBe(
+      "Mods/KDHybridBridge.zip"
+    );
+    expect(
+      await readFile(
+        join(fixture.appRoot, "kd-hybrid", "kd-hybrid-bootstrap.js"),
+        "utf8"
+      )
+    ).toContain("upgraded");
+    expect(
+      await readFile(
+        join(dirname(dirname(fixture.appRoot)), "Mods", "KDHybridBridge.zip"),
+        "utf8"
+      )
+    ).toBe("new bridge");
+    expect(upgraded.manifest?.index.backupPath).toBe(
+      installed.manifest?.index.backupPath
+    );
+
+    await uninstall(fixture.appRoot);
+    expect(await readFile(join(fixture.appRoot, "index.html"))).toEqual(
+      originalIndex
+    );
   });
 
   it("updates the persisted planner mode without replacing the backup", async () => {
@@ -204,10 +332,11 @@ async function createFixture(): Promise<{
     '<!doctype html><script src="./out/main.js"></script>\n'
   );
   await writeFile(join(appRoot, "out", "main.js"), "fixture bundle\n");
-  await writeFile(
-    join(payloadRoot, "kd-hybrid-bootstrap.js"),
-    "globalThis.fixture = true;\n"
-  );
+    await writeFile(
+      join(payloadRoot, "kd-hybrid-bootstrap.js"),
+      "globalThis.fixture = true;\n"
+    );
+    await writeFile(join(payloadRoot, "KDHybridBridge.zip"), "test");
   await writeFile(join(payloadRoot, "wasm", "core.wasm"), Uint8Array.of(0, 97, 115, 109));
   const saveSentinel = join(saveRoot, "profile.sav");
   await writeFile(saveSentinel, "do-not-touch");

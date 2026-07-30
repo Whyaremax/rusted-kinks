@@ -45,7 +45,15 @@ describe("portable mod packager", () => {
       }
       const output = join(root, "KDHybrid.zip");
       await packagePortableMod({ payloadRoot: payload, output, version: "0.1.0" });
-      const archive = unzipSync(await readFile(output));
+      const firstBytes = await readFile(output);
+      const secondOutput = join(root, "KDHybrid-second.zip");
+      await packagePortableMod({
+        payloadRoot: payload,
+        output: secondOutput,
+        version: "0.1.0"
+      });
+      expect(await readFile(secondOutput)).toEqual(firstBytes);
+      const archive = unzipSync(firstBytes);
       const manifest = JSON.parse(
         new TextDecoder().decode(archive["mod.json"])
       ) as { modname: string; fileorder: string[] };

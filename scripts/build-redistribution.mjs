@@ -13,6 +13,8 @@ import path from "node:path";
 import { build } from "esbuild";
 import { zipSync } from "fflate";
 
+const zipMtime = new Date(1980, 0, 1, 0, 0, 0);
+
 const root = path.resolve(import.meta.dirname, "..");
 const metadata = JSON.parse(
   await readFile(path.join(root, "package.json"), "utf8"),
@@ -120,7 +122,10 @@ for (const file of archiveFiles) {
   const archivePath = `${kitName}/${portablePath(path.relative(kitRoot, file))}`;
   archive[archivePath] = await readFile(file);
 }
-await writeFile(setupArchive, zipSync(archive, { level: 9 }));
+await writeFile(
+  setupArchive,
+  zipSync(archive, { level: 9, mtime: zipMtime }),
+);
 
 const sums = [
   {

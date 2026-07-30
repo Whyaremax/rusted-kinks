@@ -2,12 +2,16 @@ import { cp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
 import { build } from "esbuild";
+import { strToU8, zipSync } from "fflate";
 
 const root = resolve(import.meta.dirname, "..");
 const output = resolve(root, "dist");
 const bootstrapOutput = resolve(output, "bootstrap");
 const modOutput = resolve(output, "mod");
 const modEntryOutput = resolve(modOutput, "KDHybrid.entry.js");
+const controlModEntryOutput = resolve(output, "KDHybridBridge.entry.js");
+const metadata = JSON.parse(await readFile(resolve(root, "package.json"), "utf8"));
+const zipMtime = new Date(1980, 0, 1, 0, 0, 0);
 const legalBanner =
   "/*! KD Hybrid contains MIT and MPL-2.0 files; see NOTICE.txt and LICENSES/. */";
 
@@ -48,6 +52,21 @@ await Promise.all([
     define: {
       "process.env.NODE_ENV": '"production"'
     }
+  }),
+  build({
+    entryPoints: [resolve(root, "packages/bootstrap/src/control-mod.ts")],
+    outfile: controlModEntryOutput,
+    bundle: true,
+    format: "iife",
+    platform: "browser",
+    target: ["chrome120"],
+    sourcemap: false,
+    sourcesContent: false,
+    legalComments: "none",
+    banner: { js: legalBanner },
+    define: {
+      "process.env.NODE_ENV": '"production"'
+    }
   })
 ]);
 
@@ -61,6 +80,42 @@ await writeFile(
   `${legalBanner}\n${noModuleGlue}\n${modEntry}`
 );
 await rm(modEntryOutput);
+
+const controlModEntry = await readFile(controlModEntryOutput, "utf8");
+const controlModManifest = {
+  modname: "KD Hybrid",
+  moddesc:
+    "Native-feeling settings bridge for the installed KD Hybrid performance patch",
+  author: "KD Hybrid contributors",
+  modbuild: metadata.version,
+  gamemajor: -1,
+  gameminor: -1,
+  gamepatch_min: -1,
+  gamepatch_max: -1,
+  priority: -100,
+  fileorder: ["KDHybridBridge.js"]
+};
+await writeFile(
+  resolve(bootstrapOutput, "KDHybridBridge.zip"),
+  zipSync(
+    {
+      "mod.json": strToU8(`${JSON.stringify(controlModManifest, null, 2)}\n`),
+      "KDHybridBridge.js": strToU8(controlModEntry),
+      "README.txt": strToU8(
+        [
+          `KD Hybrid ${metadata.version} integration bridge`,
+          "",
+          "This small mod is installed by the KD Hybrid patcher.",
+          "Kinky Dungeon owns its mod-list entry, settings UI, and persistence.",
+          "The script forwards only validated options to the native Hybrid host.",
+          ""
+        ].join("\n")
+      )
+    },
+    { level: 9, mtime: zipMtime }
+  )
+);
+await rm(controlModEntryOutput);
 
 await copyWasm("wasm-web", resolve(bootstrapOutput, "wasm"), [
   "kd_hybrid_core.js",
@@ -132,7 +187,6 @@ for (const destination of [bootstrapOutput, modOutput]) {
   );
 }
 
-const metadata = JSON.parse(await readFile(resolve(root, "package.json"), "utf8"));
 await writeFile(
   resolve(bootstrapOutput, "version.json"),
   `${JSON.stringify(

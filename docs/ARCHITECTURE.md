@@ -57,6 +57,26 @@ and the modded JavaScript path wins. Other native systems remain enabled.
 Unknown bundle, unknown function, ambiguous signature, failed probe, invalid
 WASM response, or runtime exception all fail closed to JavaScript.
 
+## Native control-mod bridge
+
+The installer places one genuine mod archive at
+`Mods/KDHybridBridge.zip`. KD's own filesystem loader discovers its `mod.json`,
+loads its script, lists it alongside other mods, and renders its entries through
+the standard `KDModConfigs` and `KDModSettings` APIs. No bootstrap code wraps or
+replaces the mod-list drawing function.
+
+The early bootstrap publishes a deliberately small `KDHybridModBridge` host
+before KD loads mods. The control mod may read status and submit only three
+validated values: pathfinding mode, texture mode, and adaptive frame pacing.
+Pathfinding and pacing apply immediately. Texture selection is a startup
+decision, so a changed texture setting is persisted and reported as requiring a
+restart. Invalid types or enum values are rejected at the boundary.
+
+The patchers own this one archive by exact path, size, and SHA-256. Installation
+refuses an unrelated file at that path; status detects later changes; uninstall
+removes it only after verification. Other mod archives are never enumerated,
+rewritten, or deleted.
+
 ## Pathfinding modes
 
 Pathfinding mode is encoded in reserved query flag bits, so the binary ABI

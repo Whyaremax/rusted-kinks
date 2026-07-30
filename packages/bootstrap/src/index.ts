@@ -26,10 +26,10 @@ import {
   type KinkyDungeonModTranslatorHandle
 } from "./mod-api-translator.js";
 import {
-  installKinkyDungeonModUi,
+  installKinkyDungeonModBridgeHost,
   readPersistedKDHybridModSettings,
-  type KinkyDungeonModUiHandle
-} from "./mod-ui.js";
+  type KinkyDungeonModBridgeHostHandle
+} from "./mod-bridge-host.js";
 import {
   installKinkyDungeonStartup,
   type KinkyDungeonStartupHandle
@@ -51,7 +51,7 @@ export interface BootstrapHandle {
   readonly rendering: KinkyDungeonRenderingHandle;
   readonly startup: KinkyDungeonStartupHandle;
   readonly modTranslator: KinkyDungeonModTranslatorHandle;
-  readonly modUi: KinkyDungeonModUiHandle;
+  readonly modBridge: KinkyDungeonModBridgeHostHandle;
   readonly nativeReady: Promise<boolean>;
   dispose(): void;
 }
@@ -115,7 +115,7 @@ export function installBootstrap(): BootstrapHandle {
       ? {}
       : { upstreamBundleSha256: config.upstreamBundleSha256 })
   });
-  const modUi = installKinkyDungeonModUi({
+  const modBridge = installKinkyDungeonModBridgeHost({
     runtime,
     rendering,
     initialSettings: {
@@ -157,12 +157,12 @@ export function installBootstrap(): BootstrapHandle {
     rendering,
     startup,
     modTranslator,
-    modUi,
+    modBridge,
     nativeReady,
     dispose: () => {
       stopFrames();
       stopQuality();
-      modUi.dispose();
+      modBridge.dispose();
       rendering.dispose();
       startup.dispose();
       modTranslator.dispose();

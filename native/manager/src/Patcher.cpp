@@ -8,13 +8,16 @@
 #include <QFile>
 #include <QFileDevice>
 #include <QFileInfo>
+#include <QHash>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QRegularExpression>
 #include <QSaveFile>
+#include <QSet>
 #include <QUuid>
 
 #include <algorithm>
+#include <exception>
 namespace {
 
 constexpr auto kKnownGameVersion = "5.4.92";
@@ -24,6 +27,8 @@ constexpr auto kManifestPath = ".kd-hybrid/installation.json";
 constexpr auto kPendingPath = ".kd-hybrid/pending-installation.json";
 constexpr auto kDestinationDirectory = "kd-hybrid";
 constexpr auto kBootstrapScript = "kd-hybrid/kd-hybrid-bootstrap.js";
+constexpr auto kBridgeModFileName = "KDHybridBridge.zip";
+constexpr auto kBridgeModRelativePath = "Mods/KDHybridBridge.zip";
 
 [[noreturn]] void fail(const QString& message)
 {
@@ -113,6 +118,51 @@ QString resolveInside(const QString& root, const QString& relativePath)
     const QString prefix = normalizedRoot + QChar(u'/');
     if (!target.startsWith(prefix, pathCaseSensitivity())) {
         fail(QStringLiteral("Path escapes application root: %1").arg(relativePath));
+    }
+    return target;
+}
+
+QString bridgeModsDirectory(const QString& appRoot)
+{
+    const QFileInfo appInfo(appRoot);
+    const QDir resourcesDirectory = appInfo.dir();
+    if (appInfo.fileName().compare(QStringLiteral("app"),
+                                   Qt::CaseInsensitive)
+            != 0
+        || resourcesDirectory.dirName().compare(
+               QStringLiteral("resources"), Qt::CaseInsensitive)
+            != 0) {
+        fail(QStringLiteral(
+                 "KD Hybrid bridge mod requires a resources/app layout: %1")
+                 .arg(appRoot));
+    }
+    QDir gameDirectory = resourcesDirectory;
+    if (!gameDirectory.cdUp()) {
+        fail(QStringLiteral("Could not resolve KD game root from %1")
+                 .arg(appRoot));
+    }
+    return QDir::cleanPath(
+        gameDirectory.filePath(QStringLiteral("Mods")));
+}
+
+QString resolveBridgeModPath(
+    const QString& appRoot,
+    const QString& relativePath = QString::fromLatin1(kBridgeModRelativePath))
+{
+    if (relativePath != QLatin1String(kBridgeModRelativePath)) {
+        fail(QStringLiteral("Unexpected KD Hybrid bridge mod path: %1")
+                 .arg(relativePath));
+    }
+    const QString modsDirectory = bridgeModsDirectory(appRoot);
+    const QString target = QDir::cleanPath(
+        QDir(modsDirectory).filePath(QString::fromLatin1(kBridgeModFileName)));
+    if (QFileInfo(target).absolutePath().compare(
+            modsDirectory, pathCaseSensitivity())
+            != 0
+        || QFileInfo(target).fileName()
+               != QLatin1String(kBridgeModFileName)) {
+        fail(QStringLiteral("Unsafe KD Hybrid bridge mod target: %1")
+                 .arg(target));
     }
     return target;
 }
@@ -262,6 +312,21 @@ void verifyWritableLayout(const QString& appRoot)
     }
 }
 
+void verifyWritableBridgeLayout(const QString& appRoot)
+{
+    const QString modsDirectory = bridgeModsDirectory(appRoot);
+    const QFileInfo modsInfo(modsDirectory);
+    if (modsInfo.exists()) {
+        if (!modsInfo.isDir() || modsInfo.isSymLink()) {
+            fail(QStringLiteral("KD Mods directory is unsafe: %1")
+                     .arg(modsDirectory));
+        }
+        verifyWritableDirectory(modsDirectory);
+        return;
+    }
+    verifyWritableDirectory(QFileInfo(modsDirectory).absolutePath());
+}
+
 QJsonObject readJsonObject(const QString& path)
 {
     QJsonParseError error;
@@ -294,6 +359,10 @@ QStringList payloadFiles()
     files.sort(Qt::CaseSensitive);
     if (!files.contains(QStringLiteral("kd-hybrid-bootstrap.js"))) {
         fail(QStringLiteral("Embedded payload is missing kd-hybrid-bootstrap.js"));
+    }
+    if (!files.contains(QString::fromLatin1(kBridgeModFileName))) {
+        fail(QStringLiteral("Embedded payload is missing %1")
+                 .arg(QString::fromLatin1(kBridgeModFileName)));
     }
     return files;
 }
@@ -333,6 +402,24 @@ QJsonObject validateManifest(const QJsonObject& manifest, const QString& appRoot
             appRoot, sourcePatch.value(QStringLiteral("path")).toString());
         resolveInside(
             appRoot, sourcePatch.value(QStringLiteral("backupPath")).toString());
+    }
+    const QJsonValue modBridgeValue =
+        manifest.value(QStringLiteral("modBridge"));
+    if (!modBridgeValue.isUndefined()) {
+        if (!modBridgeValue.isObject()) {
+            fail(QStringLiteral(
+                "Invalid KD Hybrid bridge mod in installation manifest"));
+        }
+        const QJsonObject modBridge = modBridgeValue.toObject();
+        if (modBridge.value(QStringLiteral("path")).toString()
+                != QLatin1String(kBridgeModRelativePath)
+            || !modBridge.value(QStringLiteral("sha256")).isString()
+            || !modBridge.value(QStringLiteral("bytes")).isDouble()) {
+            fail(QStringLiteral(
+                "Invalid KD Hybrid bridge mod in installation manifest"));
+        }
+        resolveBridgeModPath(
+            appRoot, modBridge.value(QStringLiteral("path")).toString());
     }
     return manifest;
 }
@@ -374,6 +461,190 @@ void copyPayload(const QString& appRoot, const QStringList& files)
             fail(QStringLiteral("Copied payload hash mismatch: %1")
                      .arg(relativePath));
         }
+    }
+}
+
+QJsonObject bridgeModRecord()
+{
+    const QByteArray bytes =
+        readAll(QStringLiteral(":/bootstrap/")
+                + QString::fromLatin1(kBridgeModFileName));
+    return {
+        {QStringLiteral("path"),
+         QString::fromLatin1(kBridgeModRelativePath)},
+        {QStringLiteral("sha256"), sha256(bytes)},
+        {QStringLiteral("bytes"), static_cast<double>(bytes.size())},
+    };
+}
+
+void copyBridgeMod(const QString& appRoot)
+{
+    const QString target = resolveBridgeModPath(appRoot);
+    if (QFileInfo::exists(target)) {
+        fail(QStringLiteral("Destination already exists: %1").arg(target));
+    }
+    const QByteArray bytes =
+        readAll(QStringLiteral(":/bootstrap/")
+                + QString::fromLatin1(kBridgeModFileName));
+    atomicWrite(target, bytes);
+    if (sha256File(target) != sha256(bytes)) {
+        fail(QStringLiteral("Copied bridge mod hash mismatch: %1")
+                 .arg(target));
+    }
+}
+
+bool embeddedPayloadMatches(const QJsonObject& manifest)
+{
+    if (manifest.value(QStringLiteral("toolVersion")).toString()
+            != QLatin1String(KD_MANAGER_VERSION)) {
+        return false;
+    }
+    const QStringList files = payloadFiles();
+    const QJsonArray installed =
+        manifest.value(QStringLiteral("files")).toArray();
+    if (installed.size() != files.size()) {
+        return false;
+    }
+    QHash<QString, QJsonObject> installedByPath;
+    for (const QJsonValue& value : installed) {
+        const QJsonObject record = value.toObject();
+        installedByPath.insert(
+            record.value(QStringLiteral("path")).toString(), record);
+    }
+    for (const QString& relativePath : files) {
+        const QJsonObject desired = embeddedFileRecord(relativePath);
+        const QJsonObject actual = installedByPath.value(
+            desired.value(QStringLiteral("path")).toString());
+        if (actual.value(QStringLiteral("sha256")).toString()
+                != desired.value(QStringLiteral("sha256")).toString()
+            || actual.value(QStringLiteral("bytes")).toDouble()
+                != desired.value(QStringLiteral("bytes")).toDouble()) {
+            return false;
+        }
+    }
+    const QJsonObject installedBridge =
+        manifest.value(QStringLiteral("modBridge")).toObject();
+    const QJsonObject desiredBridge = bridgeModRecord();
+    return installedBridge.value(QStringLiteral("path")).toString()
+            == desiredBridge.value(QStringLiteral("path")).toString()
+        && installedBridge.value(QStringLiteral("sha256")).toString()
+            == desiredBridge.value(QStringLiteral("sha256")).toString()
+        && installedBridge.value(QStringLiteral("bytes")).toDouble()
+            == desiredBridge.value(QStringLiteral("bytes")).toDouble();
+}
+
+void upgradeInstalledPayload(const kd::PatcherStatus& current)
+{
+    const QString& appRoot = current.inspection.appRoot;
+    verifyWritableLayout(appRoot);
+    verifyWritableBridgeLayout(appRoot);
+    const QString bridgeTarget = resolveBridgeModPath(appRoot);
+    const QJsonObject currentBridge =
+        current.manifest.value(QStringLiteral("modBridge")).toObject();
+    if (currentBridge.isEmpty() && QFileInfo::exists(bridgeTarget)) {
+        fail(QStringLiteral("Destination already exists: %1")
+                 .arg(bridgeTarget));
+    }
+
+    const QString manifestPath = resolveInside(appRoot, kManifestPath);
+    const QString pendingPath = resolveInside(appRoot, kPendingPath);
+    const QByteArray previousManifest = readAll(manifestPath);
+    QHash<QString, QByteArray> previousFiles;
+    for (const QJsonValue& value :
+         current.manifest.value(QStringLiteral("files")).toArray()) {
+        const QString relativePath =
+            value.toObject().value(QStringLiteral("path")).toString();
+        previousFiles.insert(relativePath,
+                             readAll(resolveInside(appRoot, relativePath)));
+    }
+    const bool hadBridge = !currentBridge.isEmpty();
+    const QByteArray previousBridge =
+        hadBridge ? readAll(bridgeTarget) : QByteArray();
+
+    const QStringList files = payloadFiles();
+    QJsonArray installedFiles;
+    QSet<QString> desiredPaths;
+    for (const QString& relativePath : files) {
+        const QJsonObject record = embeddedFileRecord(relativePath);
+        installedFiles.append(record);
+        desiredPaths.insert(
+            record.value(QStringLiteral("path")).toString());
+    }
+    QJsonObject updatedManifest = current.manifest;
+    updatedManifest.insert(QStringLiteral("toolVersion"),
+                           QString::fromLatin1(KD_MANAGER_VERSION));
+    updatedManifest.insert(QStringLiteral("files"), installedFiles);
+    updatedManifest.insert(QStringLiteral("modBridge"), bridgeModRecord());
+
+    atomicWriteJson(pendingPath, updatedManifest);
+    try {
+        for (const QString& relativePath : files) {
+            const QByteArray bytes =
+                readAll(QStringLiteral(":/bootstrap/") + relativePath);
+            const QString target = resolveInside(
+                appRoot, QStringLiteral("%1/%2")
+                             .arg(kDestinationDirectory, relativePath));
+            atomicWrite(target, bytes);
+            if (sha256File(target) != sha256(bytes)) {
+                fail(QStringLiteral("Upgraded payload hash mismatch: %1")
+                         .arg(relativePath));
+            }
+        }
+        for (auto it = previousFiles.cbegin();
+             it != previousFiles.cend(); ++it) {
+            if (!desiredPaths.contains(it.key())
+                && QFileInfo::exists(resolveInside(appRoot, it.key()))
+                && !QFile::remove(resolveInside(appRoot, it.key()))) {
+                fail(QStringLiteral("Could not remove obsolete payload: %1")
+                         .arg(it.key()));
+            }
+        }
+        const QByteArray bridgeBytes =
+            readAll(QStringLiteral(":/bootstrap/")
+                    + QString::fromLatin1(kBridgeModFileName));
+        atomicWrite(bridgeTarget, bridgeBytes);
+        if (sha256File(bridgeTarget) != sha256(bridgeBytes)) {
+            fail(QStringLiteral("Upgraded bridge mod hash mismatch"));
+        }
+        atomicWriteJson(manifestPath, updatedManifest);
+        if (!QFile::remove(pendingPath)) {
+            fail(QStringLiteral(
+                     "Upgrade succeeded, but could not remove pending journal: %1")
+                     .arg(pendingPath));
+        }
+    } catch (...) {
+        const std::exception_ptr original = std::current_exception();
+        try {
+            for (const QString& relativePath : files) {
+                const QString installedPath =
+                    QStringLiteral("%1/%2")
+                        .arg(kDestinationDirectory, relativePath);
+                const QString target =
+                    resolveInside(appRoot, installedPath);
+                if (previousFiles.contains(installedPath)) {
+                    atomicWrite(target,
+                                previousFiles.value(installedPath));
+                } else if (QFileInfo::exists(target)) {
+                    QFile::remove(target);
+                }
+            }
+            for (auto it = previousFiles.cbegin();
+                 it != previousFiles.cend(); ++it) {
+                if (!desiredPaths.contains(it.key())) {
+                    atomicWrite(resolveInside(appRoot, it.key()), it.value());
+                }
+            }
+            if (hadBridge) {
+                atomicWrite(bridgeTarget, previousBridge);
+            } else if (QFileInfo::exists(bridgeTarget)) {
+                QFile::remove(bridgeTarget);
+            }
+            atomicWrite(manifestPath, previousManifest);
+            QFile::remove(pendingPath);
+        } catch (...) {
+            // Keep the journal when rollback itself cannot complete.
+        }
+        std::rethrow_exception(original);
     }
 }
 
@@ -495,6 +766,25 @@ PatcherStatus Patcher::status(const QString& selectedPath)
             result.problems.append(relativePath + QStringLiteral(" was modified"));
         }
     }
+    const QJsonObject modBridge =
+        result.manifest.value(QStringLiteral("modBridge")).toObject();
+    if (!modBridge.isEmpty()) {
+        const QString relativePath =
+            modBridge.value(QStringLiteral("path")).toString();
+        const QString target =
+            resolveBridgeModPath(appRoot, relativePath);
+        const QFileInfo targetInfo(target);
+        if (!targetInfo.exists()) {
+            result.problems.append(relativePath
+                                   + QStringLiteral(" is missing"));
+        } else if (!targetInfo.isFile() || targetInfo.isSymLink()
+                   || sha256File(target)
+                       != modBridge.value(QStringLiteral("sha256"))
+                              .toString()) {
+            result.problems.append(relativePath
+                                   + QStringLiteral(" was modified"));
+        }
+    }
     const QJsonObject upstream =
         result.manifest.value(QStringLiteral("upstream")).toObject();
     const QJsonObject sourcePatch =
@@ -512,7 +802,10 @@ PatcherStatus Patcher::status(const QString& selectedPath)
     result.state = QFileInfo::exists(pendingPath)
         ? PatcherState::Incomplete
         : result.problems.isEmpty() ? PatcherState::Installed
-                                    : PatcherState::Modified;
+                                     : PatcherState::Modified;
+    result.upgradeAvailable =
+        result.state == PatcherState::Installed
+        && !embeddedPayloadMatches(result.manifest);
     return result;
 }
 
@@ -526,7 +819,11 @@ PatcherStatus Patcher::install(const QString& selectedPath,
     const QString textureMode = validateTextureMode(textureModeInput);
     const PatcherStatus current = status(selectedPath);
     if (current.state == PatcherState::Installed) {
-        return current;
+        if (!current.upgradeAvailable) {
+            return current;
+        }
+        upgradeInstalledPayload(current);
+        return status(selectedPath);
     }
     if (current.state != PatcherState::NotInstalled) {
         fail(QStringLiteral("Refusing install over %1 patcher state: %2")
@@ -545,8 +842,15 @@ PatcherStatus Patcher::install(const QString& selectedPath,
             "has no installation manifest or original backup"));
     }
     verifyWritableLayout(inspection.appRoot);
+    verifyWritableBridgeLayout(inspection.appRoot);
 
     const QStringList files = payloadFiles();
+    const QString bridgeModPath =
+        resolveBridgeModPath(inspection.appRoot);
+    if (QFileInfo::exists(bridgeModPath)) {
+        fail(QStringLiteral("Destination already exists: %1")
+                 .arg(bridgeModPath));
+    }
     const QString bundlePath =
         resolveInside(inspection.appRoot, QStringLiteral("out/main.js"));
     const QByteArray originalBundle = readAll(bundlePath);
@@ -655,6 +959,7 @@ PatcherStatus Patcher::install(const QString& selectedPath,
              {QStringLiteral("patchedSha256"), sha256(patchedIndex)},
          }},
         {QStringLiteral("files"), installedFiles},
+        {QStringLiteral("modBridge"), bridgeModRecord()},
         {QStringLiteral("settings"),
          QJsonObject{
              {QStringLiteral("pathfindingMode"), pathfindingMode},
@@ -671,6 +976,7 @@ PatcherStatus Patcher::install(const QString& selectedPath,
     }
     atomicWriteJson(resolveInside(inspection.appRoot, kPendingPath), manifest);
     copyPayload(inspection.appRoot, files);
+    copyBridgeMod(inspection.appRoot);
     if (sourcePatch.applied) {
         atomicWrite(bundlePath, sourcePatch.bytes);
     }
@@ -849,6 +1155,17 @@ PatcherStatus Patcher::uninstall(const QString& selectedPath)
         fail(QStringLiteral("Could not remove installed payload: %1")
                  .arg(destination));
     }
+    const QJsonObject modBridge =
+        current.manifest.value(QStringLiteral("modBridge")).toObject();
+    if (!modBridge.isEmpty()) {
+        const QString bridgeModPath = resolveBridgeModPath(
+            appRoot, modBridge.value(QStringLiteral("path")).toString());
+        if (QFileInfo::exists(bridgeModPath)
+            && !QFile::remove(bridgeModPath)) {
+            fail(QStringLiteral("Could not remove installed bridge mod: %1")
+                     .arg(bridgeModPath));
+        }
+    }
 
     const QString id =
         current.manifest.value(QStringLiteral("id")).toString();
@@ -882,7 +1199,8 @@ QJsonObject Patcher::toJson(const PatcherStatus& value)
         {QStringLiteral("sourcePatched"), value.inspection.sourcePatched},
         {QStringLiteral("manifest"),
          value.manifest.isEmpty() ? QJsonValue(QJsonValue::Null)
-                                  : QJsonValue(value.manifest)},
+                                   : QJsonValue(value.manifest)},
+        {QStringLiteral("upgradeAvailable"), value.upgradeAvailable},
         {QStringLiteral("problems"), problems},
     };
 }

@@ -462,20 +462,35 @@ void MainWindow::refreshStatus()
 
 void MainWindow::installBootstrap()
 {
-    if (!hasStatus_ || !status_.inspection.knownBundle) {
+    const bool upgrading =
+        hasStatus_ && status_.state == kd::PatcherState::Installed
+        && status_.upgradeAvailable;
+    if (!hasStatus_ || !status_.inspection.knownBundle
+        || (status_.state == kd::PatcherState::Installed && !upgrading)) {
         return;
     }
     const auto answer = QMessageBox::question(
-        this, QStringLiteral("Install early bootstrap?"),
-        QStringLiteral(
-            "KD Hybrid will back up index.html and out/main.js, apply the "
-            "verified source optimization, copy the bootstrap payload, and "
-            "record hashes for safe removal.\n\n"
-            "Game saves and Electron userData are not accessed."));
+        this,
+        upgrading ? QStringLiteral("Update KD Hybrid integration?")
+                  : QStringLiteral("Install early bootstrap?"),
+        upgrading
+            ? QStringLiteral(
+                  "KD Hybrid will replace only its hash-verified payload and "
+                  "install the genuine KD control mod in the Mods folder. The "
+                  "original game backups remain unchanged.\n\n"
+                  "Game saves and Electron userData are not accessed.")
+            : QStringLiteral(
+                  "KD Hybrid will back up index.html and out/main.js, apply the "
+                  "verified source optimization, copy the bootstrap payload, "
+                  "install its control mod, and record hashes for safe "
+                  "removal.\n\n"
+                  "Game saves and Electron userData are not accessed."));
     if (answer != QMessageBox::Yes) {
         return;
     }
-    runOperation(QStringLiteral("Install"), [this] {
+    runOperation(upgrading ? QStringLiteral("Update integration")
+                           : QStringLiteral("Install"),
+                 [this] {
         return kd::Patcher::install(
             pathEdit_->text().trimmed(), false,
             pathfindingMode_->currentData().toString(),
@@ -591,25 +606,38 @@ void MainWindow::displayStatus(const kd::PatcherStatus& status)
             QStringLiteral("Unknown game bundle | patching disabled"));
     }
     if (status.problems.isEmpty()) {
-        detailLabel_->setText(
-            status.state == kd::PatcherState::Installed
-                ? QStringLiteral(
-                      "Bootstrap and source optimization are installed; all "
-                      "files and backups match their recorded hashes.")
-                : status.inspection.sourcePatched
-                ? QStringLiteral(
-                      "This bundle has the recognized source patch but no "
-                      "installation manifest or original backup. Restore a "
-                      "clean game bundle before installing.")
-                : QStringLiteral(
-                      "Ready. No bootstrap installation manifest is active."));
+        if (status.state == kd::PatcherState::Installed) {
+            detailLabel_->setText(
+                status.upgradeAvailable
+                    ? QStringLiteral(
+                          "The installed files are verified. Update integration "
+                          "to replace the synthetic menu hook with KD's genuine "
+                          "bridge mod.")
+                    : QStringLiteral(
+                          "Bootstrap, source optimization, and KD control mod "
+                          "are installed; all files and backups match their "
+                          "recorded hashes."));
+        } else if (status.inspection.sourcePatched) {
+            detailLabel_->setText(QStringLiteral(
+                "This bundle has the recognized source patch but no "
+                "installation manifest or original backup. Restore a "
+                "clean game bundle before installing."));
+        } else {
+            detailLabel_->setText(QStringLiteral(
+                "Ready. No bootstrap installation manifest is active."));
+        }
     } else {
         detailLabel_->setText(status.problems.join(QStringLiteral("\n")));
     }
+    installButton_->setText(
+        status.upgradeAvailable ? QStringLiteral("Update integration")
+                                : QStringLiteral("Install bootstrap"));
     installButton_->setEnabled(
-        status.state == kd::PatcherState::NotInstalled
-        && status.inspection.knownBundle
-        && !status.inspection.sourcePatched);
+        ((status.state == kd::PatcherState::NotInstalled
+          && !status.inspection.sourcePatched)
+         || (status.state == kd::PatcherState::Installed
+             && status.upgradeAvailable))
+        && status.inspection.knownBundle);
     uninstallButton_->setEnabled(status.state == kd::PatcherState::Installed);
     applyModeButton_->setEnabled(
         status.state == kd::PatcherState::Installed);

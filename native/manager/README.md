@@ -1,8 +1,8 @@
 # KD Hybrid Manager
 
 KD Hybrid Manager is the native C++/Qt interface for installing, checking, and
-removing the optional early bootstrap. It deliberately does not install normal
-mods; Kinky Dungeon's existing mod workflow already handles those.
+removing the optional early bootstrap. It installs only its own small control
+mod; Kinky Dungeon's existing mod workflow still handles every other mod.
 
 The manager:
 
@@ -12,16 +12,21 @@ The manager:
   original TypeScript patcher;
 - applies the exact hash-gated KD 5.4.92 source optimization;
 - backs up and atomically updates both `index.html` and `out/main.js`;
+- installs `Mods/KDHybridBridge.zip`, which KD recognizes through its normal
+  mod list and uses to render Hybrid settings in the normal configuration UI;
 - installs and changes the `quality`, `fast`, or `human` pathfinding mode and
   the `auto`, `original`, `full`, or `mobile` texture policy without replacing
   the original backup;
-- verifies every copied payload file;
+- verifies every copied payload file and refuses an unrelated or modified
+  bridge ZIP;
+- updates a verified earlier v0.1.1a installation in place;
 - refuses unknown, incomplete, or user-modified states; and
 - never opens Electron `userData`, saves, or profiles.
 
 The source transformation is one exact, reviewed KD 5.4.92 patch set. The
 manager refuses it unless the original and resulting SHA-256 hashes both match.
-Uninstall verifies the stored bundle backup before restoring it. The
+Uninstall verifies the stored bundle backup before restoring it and verifies
+the owned control mod before removing it. The
 corresponding TypeScript, C++, and conventional upstream patch sources ship
 under `source/MPL-2.0/`.
 
