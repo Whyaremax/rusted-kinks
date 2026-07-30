@@ -2,6 +2,9 @@
 
 KD Hybrid Manager's own source is licensed under the repository's MIT License.
 
+The embedded browser bootstrap includes the Acorn JavaScript parser under the
+MIT License. Its license text is included as `ACORN-MIT.txt`.
+
 Release binaries dynamically use Qt 6 under the GNU Lesser General Public
 License. Qt libraries remain separate and replaceable in the extracted Windows
 runtime and the extractable Linux AppImage. Release packages include the

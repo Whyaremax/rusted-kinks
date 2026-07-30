@@ -7,6 +7,8 @@ import {
   installKinkyDungeonModTranslator,
   runWithKDTranslatedModSourceOptimizations,
   translateOfficialKDApi,
+  type LegacyModArchiveEntry,
+  type LegacyModArchiveReader,
   type KDModLoaderEnvironment,
   type KDModRegistryEnvironment,
 } from "./mod-api-translator.js";
@@ -87,6 +89,286 @@ describe("legacy KD mod API translation", () => {
         [...loadedFiles, { filename: "Unknown.ks" }],
       ),
     ).toBe(false);
+  });
+
+  it("content-proves a repacked official-API mod without a hash profile", async () => {
+    const hash = "a".repeat(64);
+    const entries = [
+      archiveEntry("mod.json", '{"modname":"API registration"}'),
+      archiveEntry(
+        "OfficialRegistration.ks",
+        `
+KDEventMapGeneric.afterModSettingsLoad.Registration = (_event, _item, data) => {
+  KinkyDungeonAddRestraintText(data.restraint, "Ear plugs");
+  KinkyDungeonRestraints.push(data.restraint);
+  KinkyDungeonRefreshRestraintsCache();
+};
+KDEventMapGeneric.afterModSettingsLoad.Registration(
+  "afterModSettingsLoad",
+  {},
+  { restraint: {} },
+);
+`,
+      ),
+      archiveEntry("Assets/Icon.png"),
+    ];
+    const translator = createLegacyModTranslator({
+      digest: async () => hash,
+      readArchive: archiveReader(entries),
+    });
+
+    const status = await translator.inspect([
+      { name: "RepackedOfficialApi.zip", blob: new Blob(["changed zip"]) },
+    ]);
+
+    expect(status.state).toBe("compatible");
+    expect(status.reason).toBeNull();
+    expect(status.profiles).toEqual([
+      expect.objectContaining({
+        id: `official-api-${hash.slice(0, 16)}`,
+        name: "RepackedOfficialApi",
+        version: "content-inspected",
+      }),
+    ]);
+    expect(status.allowedSourceOptimizations).toEqual(
+      MAP_GENERATION_SOURCE_OPTIMIZATIONS,
+    );
+    const loadedFiles = entries.map(({ filename }) => ({ filename }));
+    for (const optimization of MAP_GENERATION_SOURCE_OPTIMIZATIONS) {
+      expect(
+        translator.allowsSourceOptimization(optimization, loadedFiles),
+      ).toBe(true);
+    }
+  });
+
+  it("content-proves asset-only archives and exact/content mixtures", async () => {
+    const exact = profileById.get("useful-tooltips-1.33")!;
+    const contentHash = "b".repeat(64);
+    const contentEntries = [
+      archiveEntry("mod.json", '{"modname":"Assets"}'),
+      archiveEntry("Models/Accessory.png"),
+    ];
+    const hashes = [exact.archiveSha256, contentHash];
+    let digestIndex = 0;
+    let archiveReads = 0;
+    const translator = createLegacyModTranslator({
+      digest: async () => hashes[digestIndex++]!,
+      readArchive: async () => {
+        archiveReads += 1;
+        return contentEntries;
+      },
+    });
+
+    const status = await translator.inspect([
+      { name: "UsefulTooltips.zip", blob: new Blob(["exact"]) },
+      { name: "Assets.zip", blob: new Blob(["assets"]) },
+    ]);
+
+    expect(status.state).toBe("compatible");
+    expect(archiveReads).toBe(1);
+    expect(status.profiles).toHaveLength(2);
+    const loadedFiles = [
+      ...exact.archiveEntries,
+      ...contentEntries.map(({ filename }) => filename),
+    ].map((filename) => ({ filename }));
+    expect(
+      translator.allowsSourceOptimization(
+        MAP_GENERATION_SOURCE_OPTIMIZATIONS[0],
+        loadedFiles,
+      ),
+    ).toBe(true);
+  });
+
+  it("recognizes the clean exact-build API snapshot without weakening write guards", async () => {
+    const officialCall = "KinkyDungeonBuildSpecificOfficialApi";
+    const compatible = createLegacyModTranslator({
+      digest: async () => "9".repeat(64),
+      officialApis: [officialCall],
+      readArchive: archiveReader([
+        archiveEntry("BuildApi.js", `${officialCall}();`),
+      ]),
+    });
+    expect(
+      (
+        await compatible.inspect([
+          { name: "build-api.zip", blob: new Blob(["api"]) },
+        ])
+      ).state,
+    ).toBe("compatible");
+
+    const replacement = createLegacyModTranslator({
+      digest: async () => "8".repeat(64),
+      officialApis: ["KinkyDungeonCreateMap"],
+      readArchive: archiveReader([
+        archiveEntry(
+          "Replacement.js",
+          "KinkyDungeonCreateMap = function replacement() {};",
+        ),
+      ]),
+    });
+    expect(
+      (
+        await replacement.inspect([
+          { name: "replacement.zip", blob: new Blob(["replacement"]) },
+        ])
+      ).reason,
+    ).toBe("content-source-sensitive-write:KinkyDungeonCreateMap");
+  });
+
+  it("captures runtime APIs before archive reading can add mod globals", async () => {
+    const earlyName = "KinkyDungeonEarlySnapshotTestApi";
+    const lateName = "KinkyDungeonLateSnapshotTestApi";
+    const target = globalThis as typeof globalThis &
+      Record<string, unknown>;
+    Object.defineProperty(target, earlyName, {
+      configurable: true,
+      value: () => undefined,
+    });
+    try {
+      const early = createLegacyModTranslator({
+        digest: async () => "7".repeat(64),
+        readArchive: archiveReader([
+          archiveEntry("Early.js", `${earlyName}();`),
+        ]),
+      });
+      expect(
+        (
+          await early.inspect([
+            { name: "early.zip", blob: new Blob(["early"]) },
+          ])
+        ).state,
+      ).toBe("compatible");
+
+      const late = createLegacyModTranslator({
+        digest: async () => "6".repeat(64),
+        readArchive: async () => {
+          Object.defineProperty(target, lateName, {
+            configurable: true,
+            value: () => undefined,
+          });
+          return [archiveEntry("Late.js", `${lateName}();`)];
+        },
+      });
+      expect(
+        (
+          await late.inspect([
+            { name: "late.zip", blob: new Blob(["late"]) },
+          ])
+        ).reason,
+      ).toBe(`content-unknown-official-api:${lateName}`);
+    } finally {
+      Reflect.deleteProperty(target, earlyName);
+      Reflect.deleteProperty(target, lateName);
+    }
+  });
+
+  it("rejects source replacements, built-in mutation, dynamic code, and unknown KD calls", async () => {
+    const cases = [
+      {
+        source:
+          "KinkyDungeonCreateMap = function replacement() { return false; };",
+        reason:
+          "content-source-sensitive-write:KinkyDungeonCreateMap",
+      },
+      {
+        source: "Array.prototype.push = function replacement() {};",
+        reason: "content-builtin-mutation:Array.prototype.push",
+      },
+      {
+        source: "const generated = Function('return KDRandom()');",
+        reason: "content-dynamic-code:Function",
+      },
+      {
+        source: "KinkyDungeonUnknownOfficialCall();",
+        reason:
+          "content-unknown-official-api:KinkyDungeonUnknownOfficialCall",
+      },
+      {
+        source: "globalThis[targetName] = replacement;",
+        reason: "content-dynamic-global-write",
+      },
+      {
+        source:
+          "const root = globalThis; root.KinkyDungeonCreateMap = replacement;",
+        reason:
+          "content-source-sensitive-write:KinkyDungeonCreateMap",
+      },
+      {
+        source:
+          "const prototype = Array.prototype; prototype.push = replacement;",
+        reason: "content-builtin-mutation:Array.prototype.push",
+      },
+      {
+        source:
+          "const { Function: DynamicFunction } = globalThis; DynamicFunction('return 1');",
+        reason: "content-dynamic-code:Function",
+      },
+      {
+        source: "Function.call(null, 'return KDRandom()');",
+        reason: "content-dynamic-code:Function",
+      },
+    ];
+
+    for (const [index, candidate] of cases.entries()) {
+      const translator = createLegacyModTranslator({
+        digest: async () => index.toString(16).padStart(64, "c"),
+        readArchive: archiveReader([
+          archiveEntry(`Unsafe-${index}.js`, candidate.source),
+        ]),
+      });
+      const status = await translator.inspect([
+        { name: `Unsafe-${index}.zip`, blob: new Blob([candidate.source]) },
+      ]);
+      expect(status.state, candidate.source).toBe("fallback");
+      expect(status.reason, candidate.source).toBe(candidate.reason);
+      expect(status.allowedSourceOptimizations).toEqual([]);
+    }
+  });
+
+  it("fails closed on ambiguous archive structure and executable limits", async () => {
+    const duplicate = createLegacyModTranslator({
+      digest: async () => "d".repeat(64),
+      readArchive: archiveReader([
+        archiveEntry("Duplicate.js", "KDRandom();"),
+        archiveEntry("Duplicate.js", "KDRandom();"),
+      ]),
+    });
+    expect(
+      (
+        await duplicate.inspect([
+          { name: "duplicate-entry.zip", blob: new Blob(["duplicate"]) },
+        ])
+      ).reason,
+    ).toBe("duplicate-archive-entry");
+
+    const traversal = createLegacyModTranslator({
+      digest: async () => "e".repeat(64),
+      readArchive: archiveReader([
+        archiveEntry("../Outside.js", "KDRandom();"),
+      ]),
+    });
+    expect(
+      (
+        await traversal.inspect([
+          { name: "traversal.zip", blob: new Blob(["traversal"]) },
+        ])
+      ).reason,
+    ).toBe("unsafe-archive-filename");
+
+    const oversizedSource = createLegacyModTranslator({
+      digest: async () => "f".repeat(64),
+      maxExecutableBytes: 8,
+      readArchive: archiveReader([
+        archiveEntry("Large.js", "KDRandom();"),
+      ]),
+    });
+    expect(
+      (
+        await oversizedSource.inspect([
+          { name: "large-source.zip", blob: new Blob(["large"]) },
+        ])
+      ).reason,
+    ).toBe("executable-source-too-large");
   });
 
   it("fails closed for changed, duplicate, oversized, and malformed archives", async () => {
@@ -444,6 +726,7 @@ describe("legacy KD mod API translation", () => {
   it("preflights the selected archives before calling KD's loader", async () => {
     const useful = profileById.get("useful-tooltips-1.33")!;
     const calls: string[] = [];
+    let resolveDigest: ((hash: string) => void) | undefined;
     let executeMods: ((...args: unknown[]) => unknown) | undefined =
       async () => {
         calls.push("official");
@@ -472,9 +755,11 @@ describe("legacy KD mod API translation", () => {
       cancelScheduled: vi.fn(),
     };
     const handle = installKinkyDungeonModTranslator(environment, {
-      digest: async () => {
+      digest: () => {
         calls.push("digest");
-        return useful.archiveSha256;
+        return new Promise<string>((resolve) => {
+          resolveDigest = resolve;
+        });
       },
     });
 
@@ -482,7 +767,15 @@ describe("legacy KD mod API translation", () => {
     const returned = executeMods?.();
     expect(calls).toEqual(["digest", "official"]);
     expect(returned).toBeInstanceOf(Promise);
-    await returned;
+    let settled = false;
+    void Promise.resolve(returned).then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    resolveDigest?.(useful.archiveSha256);
+    expect(await returned).toBe("loaded");
+    expect(settled).toBe(true);
     expect(calls).toEqual(["digest", "official"]);
     expect(executeMods?.name).toBe(original?.name);
     expect(handle.status().state).toBe("compatible");
@@ -491,3 +784,23 @@ describe("legacy KD mod API translation", () => {
     expect(handle.status().state).toBe("disposed");
   });
 });
+
+function archiveEntry(
+  filename: string,
+  source?: string,
+): LegacyModArchiveEntry {
+  const executable = filename.endsWith(".js") || filename.endsWith(".ks");
+  const value = source ?? "";
+  return Object.freeze({
+    filename,
+    directory: filename.endsWith("/"),
+    uncompressedBytes: new TextEncoder().encode(value).byteLength,
+    ...(executable ? { source: value } : {}),
+  });
+}
+
+function archiveReader(
+  entries: readonly LegacyModArchiveEntry[],
+): LegacyModArchiveReader {
+  return async () => entries;
+}

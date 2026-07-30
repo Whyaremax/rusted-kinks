@@ -15,6 +15,8 @@ not endorsed by the game's authors.
 - Generated bundles can combine both categories. Their corresponding
   MPL-covered source files are included in the portable distribution under
   `source/MPL-2.0/`.
+- Generated browser bundles include the Acorn JavaScript parser under its MIT
+  license in `LICENSES/ACORN-MIT.txt`.
 
 ## Kinky Dungeon attribution
 

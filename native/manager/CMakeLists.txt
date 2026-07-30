@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(KDHybridManager VERSION 0.1.0 LANGUAGES CXX)
+project(KDHybridManager VERSION 0.1.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -18,6 +18,7 @@ set(KD_BOOTSTRAP_FILES
     "${KD_BOOTSTRAP_ROOT}/NOTICE.txt"
     "${KD_BOOTSTRAP_ROOT}/SOURCE.txt"
     "${KD_BOOTSTRAP_ROOT}/version.json"
+    "${KD_BOOTSTRAP_ROOT}/LICENSES/ACORN-MIT.txt"
     "${KD_BOOTSTRAP_ROOT}/LICENSES/MIT.txt"
     "${KD_BOOTSTRAP_ROOT}/LICENSES/MPL-2.0.txt"
     "${KD_BOOTSTRAP_ROOT}/source/MPL-2.0/crates/kd-core/src/pathfinding.rs"

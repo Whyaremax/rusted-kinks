@@ -30,6 +30,8 @@ cp "$build_dir/KDHybridManager" "$appdir/usr/bin/"
 cp "$repo_root/native/manager/assets/kd-hybrid-manager.svg" \
   "$appdir/usr/share/icons/hicolor/scalable/apps/kd-hybrid-manager.svg"
 cp "$repo_root/LICENSE" "$appdir/usr/share/licenses/KD-Hybrid-MIT.txt"
+cp "$repo_root/LICENSES/ACORN-MIT.txt" \
+  "$appdir/usr/share/licenses/ACORN-MIT.txt"
 cp "$repo_root/LICENSES/MPL-2.0.txt" \
   "$appdir/usr/share/licenses/MPL-2.0.txt"
 cp "$repo_root/LICENSES/LGPL-3.0.txt" \

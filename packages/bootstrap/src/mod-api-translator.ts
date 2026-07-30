@@ -1,12 +1,17 @@
 // SPDX-License-Identifier: MIT
 
+import {
+  analyzeOfficialModSource,
+  type OfficialModWriteKind,
+} from "./official-mod-analyzer.js";
+
 /**
- * Conservative compatibility translation for audited legacy KD mods.
+ * Conservative compatibility translation for KD mods.
  *
- * Ordinary KD mods remain JavaScript. This layer translates the observable
- * effects of byte-exact, reviewed archives into the assumptions used by KD
- * Hybrid's source fast paths. Unknown or changed archives never receive a
- * compatibility proof.
+ * Ordinary KD mods remain JavaScript. Byte-exact reviewed archives use their
+ * audited profiles; other archives are parsed without execution and receive a
+ * proof only when their executable source stays within recognizable official
+ * API effects and does not replace a source-fast-path assumption.
  */
 
 export const MAP_GENERATION_SOURCE_OPTIMIZATIONS = Object.freeze([
@@ -51,6 +56,17 @@ const API_TRANSLATIONS = Object.freeze({
   DrawBoxKD: translation("DrawBoxKD", "ui-only", "no-native-state"),
   DrawTextFitKD: translation("DrawTextFitKD", "ui-only", "no-native-state"),
   KDDraw: translation("KDDraw", "ui-only", "no-native-state"),
+  KDTex: translation("KDTex", "ui-only", "no-native-state"),
+  KDDrawChibi: translation(
+    "KDDrawChibi",
+    "ui-only",
+    "no-native-state",
+  ),
+  KDGetOrMakeRenderTexture: translation(
+    "KDGetOrMakeRenderTexture",
+    "ui-only",
+    "no-native-state",
+  ),
   MouseIn: translation("MouseIn", "read-only", "no-native-state"),
   TextGet: translation("TextGet", "read-only", "no-native-state"),
   "KinkyDungeonFlags.get": translation(
@@ -65,6 +81,16 @@ const API_TRANSLATIONS = Object.freeze({
   ),
   "KDStatRep.includes": translation(
     "KDStatRep.includes",
+    "read-only",
+    "no-native-state",
+  ),
+  "KDModSettings.hasOwnProperty": translation(
+    "KDModSettings.hasOwnProperty",
+    "read-only",
+    "no-native-state",
+  ),
+  "KDUniqueBulletHits.has": translation(
+    "KDUniqueBulletHits.has",
     "read-only",
     "no-native-state",
   ),
@@ -115,6 +141,11 @@ const API_TRANSLATIONS = Object.freeze({
   ),
   KDGetEffectTiles: translation(
     "KDGetEffectTiles",
+    "read-only",
+    "no-native-state",
+  ),
+  KinkyDungeonGetClosestSpecialAreaDist: translation(
+    "KinkyDungeonGetClosestSpecialAreaDist",
     "read-only",
     "no-native-state",
   ),
@@ -219,6 +250,72 @@ const API_TRANSLATIONS = Object.freeze({
     "event-dispatch",
     "javascript-callback",
   ),
+  KinkyDungeonAddRestraintText: translation(
+    "KinkyDungeonAddRestraintText",
+    "ui-only",
+    "no-native-state",
+  ),
+  KinkyDungeonLoad: translation(
+    "KinkyDungeonLoad",
+    "game-state-write",
+    "javascript-authoritative",
+  ),
+  KinkyDungeonLoadStats: translation(
+    "KinkyDungeonLoadStats",
+    "game-state-write",
+    "javascript-authoritative",
+  ),
+  KinkyDungeonRefreshRestraintsCache: translation(
+    "KinkyDungeonRefreshRestraintsCache",
+    "game-state-write",
+    "javascript-authoritative",
+  ),
+  "KinkyDungeonRestraints.forEach": translation(
+    "KinkyDungeonRestraints.forEach",
+    "read-only",
+    "no-native-state",
+  ),
+  "KinkyDungeonRestraints.push": translation(
+    "KinkyDungeonRestraints.push",
+    "game-state-write",
+    "javascript-authoritative",
+  ),
+  KDIsEdged: translation("KDIsEdged", "read-only", "no-native-state"),
+  KinkyDungeonGagTotal: translation(
+    "KinkyDungeonGagTotal",
+    "read-only",
+    "no-native-state",
+  ),
+  KinkyDungeonInterruptSleep: translation(
+    "KinkyDungeonInterruptSleep",
+    "game-state-write",
+    "javascript-authoritative",
+  ),
+  KinkyDungeonHandleSpellCast: translation(
+    "KinkyDungeonHandleSpellCast",
+    "game-state-write",
+    "javascript-authoritative",
+  ),
+  KinkyDungeonCastSpell: translation(
+    "KinkyDungeonCastSpell",
+    "game-state-write",
+    "javascript-authoritative",
+  ),
+  KDChangeStamina: translation(
+    "KDChangeStamina",
+    "game-state-write",
+    "javascript-authoritative",
+  ),
+  KDSendInput: translation(
+    "KDSendInput",
+    "game-state-write",
+    "javascript-authoritative",
+  ),
+  KDModsAfterLoad: translation(
+    "KDModsAfterLoad",
+    "event-dispatch",
+    "javascript-callback",
+  ),
   KinkyDungeonChangeRep: translation(
     "KinkyDungeonChangeRep",
     "game-state-write",
@@ -251,6 +348,26 @@ const API_TRANSLATIONS = Object.freeze({
   ),
   KinkyDungeonFindSpell: translation(
     "KinkyDungeonFindSpell",
+    "read-only",
+    "no-native-state",
+  ),
+  KDEnemyName: translation(
+    "KDEnemyName",
+    "read-only",
+    "no-native-state",
+  ),
+  KDRestraint: translation(
+    "KDRestraint",
+    "read-only",
+    "no-native-state",
+  ),
+  KDItemDataQuery: translation(
+    "KDItemDataQuery",
+    "read-only",
+    "no-native-state",
+  ),
+  KinkyDungeonGetRestraintByName: translation(
+    "KinkyDungeonGetRestraintByName",
     "read-only",
     "no-native-state",
   ),
@@ -398,7 +515,7 @@ export interface AuditedLegacyModProfile {
   readonly version: string;
   readonly archiveSha256: string;
   readonly archiveEntries: readonly string[];
-  readonly recognizedApis: readonly RecognizedKDApi[];
+  readonly recognizedApis: readonly string[];
   readonly javascriptEvents: readonly string[];
   readonly replacedGlobals: readonly string[];
   readonly directWrites: readonly string[];
@@ -521,6 +638,25 @@ export interface LegacyModArchive {
   readonly blob: Blob;
 }
 
+export interface LegacyModArchiveEntry {
+  readonly filename: string;
+  readonly directory: boolean;
+  readonly uncompressedBytes: number;
+  readonly source?: string;
+}
+
+export interface LegacyModArchiveReadLimits {
+  readonly maxEntries: number;
+  readonly maxExecutableFiles: number;
+  readonly maxExecutableBytes: number;
+  readonly maxTotalExecutableBytes: number;
+}
+
+export type LegacyModArchiveReader = (
+  archive: LegacyModArchive,
+  limits: LegacyModArchiveReadLimits,
+) => Promise<readonly LegacyModArchiveEntry[]>;
+
 export type LegacyModTranslationState =
   | "idle"
   | "inspecting"
@@ -560,14 +696,32 @@ export interface KDHybridModCompatibilityApi {
 export interface LegacyModTranslatorOptions {
   readonly profiles?: readonly AuditedLegacyModProfile[];
   readonly digest?: (blob: Blob) => Promise<string>;
+  readonly readArchive?: LegacyModArchiveReader;
+  /**
+   * Test/embedding override. The browser default snapshots KD's own global
+   * function surface synchronously before the first selected mod executes.
+   */
+  readonly officialApis?: readonly string[];
   readonly maxArchives?: number;
   readonly maxArchiveBytes?: number;
   readonly maxTotalBytes?: number;
+  readonly maxArchiveEntries?: number;
+  readonly maxTotalEntries?: number;
+  readonly maxExecutableFiles?: number;
+  readonly maxTotalExecutableFiles?: number;
+  readonly maxExecutableBytes?: number;
+  readonly maxTotalExecutableBytes?: number;
 }
 
 const DEFAULT_MAX_ARCHIVES = 64;
-const DEFAULT_MAX_ARCHIVE_BYTES = 32 * 1024 * 1024;
-const DEFAULT_MAX_TOTAL_BYTES = 64 * 1024 * 1024;
+const DEFAULT_MAX_ARCHIVE_BYTES = 128 * 1024 * 1024;
+const DEFAULT_MAX_TOTAL_BYTES = 512 * 1024 * 1024;
+const DEFAULT_MAX_ARCHIVE_ENTRIES = 8_192;
+const DEFAULT_MAX_TOTAL_ENTRIES = 32_768;
+const DEFAULT_MAX_EXECUTABLE_FILES = 256;
+const DEFAULT_MAX_TOTAL_EXECUTABLE_FILES = 1_024;
+const DEFAULT_MAX_EXECUTABLE_BYTES = 4 * 1024 * 1024;
+const DEFAULT_MAX_TOTAL_EXECUTABLE_BYTES = 64 * 1024 * 1024;
 const trustedCompatibilityApis = new WeakSet<KDHybridModCompatibilityApi>();
 
 export function createLegacyModTranslator(
@@ -580,10 +734,31 @@ export function createLegacyModTranslator(
     ]),
   );
   const digest = options.digest ?? sha256Blob;
+  const readArchive = options.readArchive ?? readArchiveWithKDZipModel;
   const maxArchives = options.maxArchives ?? DEFAULT_MAX_ARCHIVES;
   const maxArchiveBytes =
     options.maxArchiveBytes ?? DEFAULT_MAX_ARCHIVE_BYTES;
   const maxTotalBytes = options.maxTotalBytes ?? DEFAULT_MAX_TOTAL_BYTES;
+  const maxArchiveEntries =
+    options.maxArchiveEntries ?? DEFAULT_MAX_ARCHIVE_ENTRIES;
+  const maxTotalEntries =
+    options.maxTotalEntries ?? DEFAULT_MAX_TOTAL_ENTRIES;
+  const maxExecutableFiles =
+    options.maxExecutableFiles ?? DEFAULT_MAX_EXECUTABLE_FILES;
+  const maxTotalExecutableFiles =
+    options.maxTotalExecutableFiles ??
+    DEFAULT_MAX_TOTAL_EXECUTABLE_FILES;
+  const maxExecutableBytes =
+    options.maxExecutableBytes ?? DEFAULT_MAX_EXECUTABLE_BYTES;
+  const maxTotalExecutableBytes =
+    options.maxTotalExecutableBytes ??
+    DEFAULT_MAX_TOTAL_EXECUTABLE_BYTES;
+  const readLimits = Object.freeze({
+    maxEntries: maxArchiveEntries,
+    maxExecutableFiles,
+    maxExecutableBytes,
+    maxTotalExecutableBytes,
+  });
   let generation = 0;
   let expectedEntries: readonly string[] = Object.freeze([]);
   let acceptedProfiles: readonly AuditedLegacyModProfile[] = Object.freeze([]);
@@ -617,6 +792,9 @@ export function createLegacyModTranslator(
       acceptedProfiles = Object.freeze([]);
 
       try {
+        const officialApis = new Set(
+          options.officialApis ?? snapshotOfficialKDGlobalFunctions(),
+        );
         if (archives.length > maxArchives) {
           return commitFallback(
             currentGeneration,
@@ -625,6 +803,9 @@ export function createLegacyModTranslator(
           );
         }
         let totalBytes = 0;
+        let totalEntries = 0;
+        let totalExecutableFiles = 0;
+        let totalExecutableBytes = 0;
         const matched: AuditedLegacyModProfile[] = [];
         const seenDigests = new Set<string>();
         for (const archive of archives) {
@@ -651,7 +832,10 @@ export function createLegacyModTranslator(
             );
           }
           const hash = (await digest(archive.blob)).toLowerCase();
-          if (currentGeneration !== generation || status.state === "disposed") {
+          if (
+            currentGeneration !== generation ||
+            isDisposedTranslationStatus(status)
+          ) {
             return status;
           }
           if (!/^[a-f0-9]{64}$/u.test(hash)) {
@@ -670,14 +854,74 @@ export function createLegacyModTranslator(
           }
           seenDigests.add(hash);
           const matchedProfile = profiles.get(hash);
-          if (matchedProfile === undefined) {
+          if (matchedProfile !== undefined) {
+            totalEntries += matchedProfile.archiveEntries.length;
+            if (totalEntries > maxTotalEntries) {
+              return commitFallback(
+                currentGeneration,
+                "archive-entry-total-too-large",
+                archives.length,
+              );
+            }
+            matched.push(matchedProfile);
+            continue;
+          }
+
+          let archiveEntries: readonly LegacyModArchiveEntry[];
+          try {
+            archiveEntries = await readArchive(archive, readLimits);
+          } catch {
             return commitFallback(
               currentGeneration,
-              "unrecognized-archive",
+              "archive-read-error",
               archives.length,
             );
           }
-          matched.push(matchedProfile);
+          if (
+            currentGeneration !== generation ||
+            isDisposedTranslationStatus(status)
+          ) {
+            return status;
+          }
+          const contentProfile = createContentInspectedProfile(
+            archive,
+            hash,
+            archiveEntries,
+            readLimits,
+            officialApis,
+          );
+          if (contentProfile.profile === null) {
+            return commitFallback(
+              currentGeneration,
+              contentProfile.reason,
+              archives.length,
+            );
+          }
+          totalEntries += contentProfile.entryCount;
+          totalExecutableFiles += contentProfile.executableFiles;
+          totalExecutableBytes += contentProfile.executableBytes;
+          if (totalEntries > maxTotalEntries) {
+            return commitFallback(
+              currentGeneration,
+              "archive-entry-total-too-large",
+              archives.length,
+            );
+          }
+          if (totalExecutableFiles > maxTotalExecutableFiles) {
+            return commitFallback(
+              currentGeneration,
+              "executable-file-total-too-large",
+              archives.length,
+            );
+          }
+          if (totalExecutableBytes > maxTotalExecutableBytes) {
+            return commitFallback(
+              currentGeneration,
+              "executable-byte-total-too-large",
+              archives.length,
+            );
+          }
+          matched.push(contentProfile.profile);
         }
 
         const allowed = intersectSourceOptimizations(matched);
@@ -903,15 +1147,16 @@ export function installKinkyDungeonModTranslator(
       ...args: unknown[]
     ): unknown {
       const order = environment.readModLoadOrder();
+      let inspection: Promise<LegacyModTranslationStatus>;
       if (order === undefined) {
-        void translator.inspect([
+        inspection = translator.inspect([
           {
             name: "unavailable-load-order",
             blob: new Blob([]),
           },
         ]);
       } else {
-        void translator.inspect(
+        inspection = translator.inspect(
           order.map((entry) => ({
             name: entry.name,
             blob: entry.mod,
@@ -921,7 +1166,21 @@ export function installKinkyDungeonModTranslator(
       // KDGetModsLoad deliberately does not await KDExecuteMods. Invoke the
       // official function in the same synchronous turn so its loading flags
       // and promise semantics remain observable to callers.
-      return Reflect.apply(candidate, this, args);
+      const officialResult = Reflect.apply(candidate, this, args);
+      if (!isPromiseLike(officialResult)) {
+        void inspection;
+        return officialResult;
+      }
+      return Promise.resolve(officialResult).then(
+        async (value) => {
+          await inspection;
+          return value;
+        },
+        async (error: unknown) => {
+          await inspection;
+          throw error;
+        },
+      );
     };
     try {
       Object.defineProperty(replacement, "name", {
@@ -1008,8 +1267,8 @@ const browserModRegistryEnvironment: KDModRegistryEnvironment = {
 };
 
 /**
- * Lets the already-guarded v67 source fast paths run for byte-exact audited
- * mods during one official map-generation transaction.
+ * Lets the already-guarded v67 source fast paths run for audited or
+ * content-proven mods during one official map-generation transaction.
  *
  * The real registry objects are never mutated. Their lexical bindings are
  * restored in `finally`, and any missing proof or unusual registry shape runs
@@ -1085,6 +1344,418 @@ function recordActivationSafely(
   }
 }
 
+interface ContentInspectedProfileResult {
+  readonly profile: AuditedLegacyModProfile | null;
+  readonly reason: string;
+  readonly entryCount: number;
+  readonly executableFiles: number;
+  readonly executableBytes: number;
+}
+
+const SOURCE_SENSITIVE_GLOBALS = new Set([
+  "KDAllModFiles",
+  "KDCheckMapTileFilling",
+  "KDGetRestraintsEligible",
+  "KDGeteligrest_gettags",
+  "KDLooseIndexRankingSuspend",
+  "KDModsLoaded",
+  "KDPathCache",
+  "KDPathCacheIgnoreLocks",
+  "KDSetPathfindCache",
+  "KD_GetMapTile",
+  "KD_PasteTile",
+  "KinkyDungeonCreateMap",
+  "KinkyDungeonFindPath",
+  "KinkyDungeonGetAccessible",
+  "KinkyDungeonGetAccessibleRoom",
+  "KinkyDungeonGetPath",
+  "KinkyDungeonGroundTiles",
+  "KinkyDungeonMapGet",
+  "KinkyDungeonMapSet",
+  "KinkyDungeonMapSetForce",
+  "KinkyDungeonMovableTilesEnemy",
+  "KinkyDungeonMovableTilesSmartEnemy",
+  "KinkyDungeonPlaceDoors",
+  "KinkyDungeonRestraints",
+  "KinkyDungeonTilesGet",
+  "KinkyDungeonTilesSet",
+]);
+const SOURCE_SENSITIVE_PREFIXES = Object.freeze([
+  "KDHybrid",
+  "KDMapTilesPopulate",
+  "KinkyDungeonCreateMapGenType",
+  "KinkyDungeonGenerateSetpiece",
+  "KinkyDungeonPlace",
+] as const);
+const CONTENT_SAFE_GLOBAL_STATE_ASSIGNMENTS = new Set([
+  "KDExpressions",
+  "KDLoadingTextKeys",
+  "KDModConfigs",
+  "KDModSettings",
+  "KDModsAfterLoad",
+  // Input dispatch is not read by any map-generation source fast path.
+  "KDSendInput",
+  "KinkyDungeonUpdateLightGrid",
+]);
+
+function createContentInspectedProfile(
+  archive: LegacyModArchive,
+  hash: string,
+  entries: readonly LegacyModArchiveEntry[],
+  limits: LegacyModArchiveReadLimits,
+  officialApis: ReadonlySet<string>,
+): ContentInspectedProfileResult {
+  if (!Array.isArray(entries)) {
+    return contentProfileFailure("invalid-archive-entry-list");
+  }
+  if (entries.length > limits.maxEntries) {
+    return contentProfileFailure("archive-entry-count-too-large");
+  }
+
+  const filenames: string[] = [];
+  const seenFilenames = new Set<string>();
+  const recognizedApis = new Set<string>();
+  const javascriptEvents = new Set<string>();
+  const replacedGlobals = new Set<string>();
+  const directWrites = new Set<string>();
+  let executableFiles = 0;
+  let executableBytes = 0;
+
+  for (const entry of entries) {
+    if (!isLegacyModArchiveEntry(entry)) {
+      return contentProfileFailure("invalid-archive-entry");
+    }
+    if (!isSafeArchiveFilename(entry.filename)) {
+      return contentProfileFailure("unsafe-archive-filename");
+    }
+    if (seenFilenames.has(entry.filename)) {
+      return contentProfileFailure("duplicate-archive-entry");
+    }
+    seenFilenames.add(entry.filename);
+    filenames.push(entry.filename);
+    if (entry.directory || !isExecutableModFilename(entry.filename)) {
+      continue;
+    }
+    if (typeof entry.source !== "string") {
+      return contentProfileFailure("missing-executable-source");
+    }
+    if (entry.source.includes("\0")) {
+      return contentProfileFailure("executable-source-contains-null");
+    }
+    executableFiles += 1;
+    const actualBytes = utf8Length(entry.source);
+    const boundedBytes = Math.max(entry.uncompressedBytes, actualBytes);
+    executableBytes += boundedBytes;
+    if (
+      executableFiles > limits.maxExecutableFiles ||
+      boundedBytes > limits.maxExecutableBytes ||
+      executableBytes > limits.maxTotalExecutableBytes
+    ) {
+      return contentProfileFailure("executable-source-too-large");
+    }
+
+    const analysis = analyzeOfficialModSource(entry.source, {
+      recognizeApi: (api) =>
+        translateOfficialKDApi(api) !== undefined || officialApis.has(api),
+      isSensitiveWrite: isSourceSensitiveWrite,
+    });
+    if (!analysis.compatible) {
+      return contentProfileFailure(
+        `content-${analysis.reason ?? "incompatible-source"}`,
+      );
+    }
+    for (const api of analysis.recognizedApis) {
+      recognizedApis.add(api);
+    }
+    for (const event of analysis.javascriptEvents) {
+      javascriptEvents.add(event);
+    }
+    for (const replaced of analysis.replacedGlobals) {
+      replacedGlobals.add(replaced);
+    }
+    for (const write of analysis.directWrites) {
+      directWrites.add(write);
+    }
+  }
+
+  const displayName =
+    archive.name.replace(/\.zip$/iu, "").trim() || "Content-inspected mod";
+  return {
+    profile: profile({
+      id: `official-api-${hash.slice(0, 16)}`,
+      name: displayName,
+      version: "content-inspected",
+      archiveSha256: hash,
+      archiveEntries: filenames,
+      recognizedApis: [...recognizedApis].sort(),
+      javascriptEvents: [...javascriptEvents].sort(),
+      replacedGlobals: [...replacedGlobals].sort(),
+      directWrites: [...directWrites].sort(),
+      safeSourceOptimizations:
+        ALL_MAP_GENERATION_SOURCE_OPTIMIZATIONS,
+    }),
+    reason: "",
+    entryCount: entries.length,
+    executableFiles,
+    executableBytes,
+  };
+}
+
+function contentProfileFailure(reason: string): ContentInspectedProfileResult {
+  return {
+    profile: null,
+    reason,
+    entryCount: 0,
+    executableFiles: 0,
+    executableBytes: 0,
+  };
+}
+
+function isSourceSensitiveWrite(
+  path: string,
+  kind: OfficialModWriteKind,
+): boolean {
+  const root = path.split(".", 1)[0] ?? path;
+  if (
+    path === root &&
+    (kind === "assignment" || kind === "delete" || kind === "update") &&
+    (root.startsWith("KD") || root.startsWith("KinkyDungeon")) &&
+    !CONTENT_SAFE_GLOBAL_STATE_ASSIGNMENTS.has(root)
+  ) {
+    return true;
+  }
+  if (SOURCE_SENSITIVE_PREFIXES.some((prefix) => root.startsWith(prefix))) {
+    return true;
+  }
+  if (!SOURCE_SENSITIVE_GLOBALS.has(root)) {
+    return false;
+  }
+  if (
+    kind === "mutation" &&
+    (root === "KinkyDungeonRestraints" ||
+      root === "KinkyDungeonGroundTiles" ||
+      root === "KinkyDungeonMovableTilesEnemy" ||
+      root === "KinkyDungeonMovableTilesSmartEnemy")
+  ) {
+    return false;
+  }
+  return path === root || root === "KDAllModFiles" || root === "KDHybrid";
+}
+
+function isLegacyModArchiveEntry(
+  value: unknown,
+): value is LegacyModArchiveEntry {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const candidate = value as {
+    readonly filename?: unknown;
+    readonly directory?: unknown;
+    readonly uncompressedBytes?: unknown;
+    readonly source?: unknown;
+  };
+  return (
+    typeof candidate.filename === "string" &&
+    typeof candidate.directory === "boolean" &&
+    Number.isSafeInteger(candidate.uncompressedBytes) &&
+    (candidate.uncompressedBytes as number) >= 0 &&
+    (candidate.source === undefined || typeof candidate.source === "string")
+  );
+}
+
+function isSafeArchiveFilename(filename: string): boolean {
+  if (
+    filename.length === 0 ||
+    filename.length > 2_048 ||
+    filename.includes("\0") ||
+    filename.startsWith("/") ||
+    filename.startsWith("\\") ||
+    /^[A-Za-z]:/u.test(filename)
+  ) {
+    return false;
+  }
+  return !filename.split(/[\\/]/u).some((part) => part === "..");
+}
+
+function isExecutableModFilename(filename: string): boolean {
+  // Keep this case-sensitive to match KD's official processFile checks.
+  return filename.endsWith(".js") || filename.endsWith(".ks");
+}
+
+function utf8Length(value: string): number {
+  return new TextEncoder().encode(value).byteLength;
+}
+
+function snapshotOfficialKDGlobalFunctions(): readonly string[] {
+  let names: string[];
+  try {
+    names = Object.getOwnPropertyNames(globalThis);
+  } catch {
+    return Object.freeze([]);
+  }
+  const result: string[] = [];
+  for (const name of names) {
+    if (
+      (!name.startsWith("KD") && !name.startsWith("KinkyDungeon")) ||
+      name.startsWith("KDHybrid")
+    ) {
+      continue;
+    }
+    try {
+      const descriptor = Object.getOwnPropertyDescriptor(globalThis, name);
+      if (typeof descriptor?.value === "function") {
+        result.push(name);
+      }
+    } catch {
+      // Host accessors are not part of the stable official function surface.
+    }
+  }
+  return Object.freeze(result.sort());
+}
+
+interface KDZipModelEntry {
+  readonly filename?: unknown;
+  readonly directory?: unknown;
+  readonly uncompressedSize?: unknown;
+}
+
+interface KDZipModel {
+  getEntries(
+    file: Blob,
+    options?: Readonly<Record<string, unknown>>,
+  ): Promise<readonly KDZipModelEntry[]>;
+  getURL(
+    entry: KDZipModelEntry,
+    options?: Readonly<Record<string, unknown>>,
+  ): Promise<string>;
+}
+
+declare const model: KDZipModel | undefined;
+
+async function readArchiveWithKDZipModel(
+  archive: LegacyModArchive,
+  limits: LegacyModArchiveReadLimits,
+): Promise<readonly LegacyModArchiveEntry[]> {
+  let zipModel: KDZipModel | undefined;
+  try {
+    zipModel = model;
+  } catch {
+    zipModel = undefined;
+  }
+  if (
+    zipModel === undefined ||
+    typeof zipModel.getEntries !== "function" ||
+    typeof zipModel.getURL !== "function"
+  ) {
+    throw new Error("KD ZIP model is unavailable");
+  }
+  const rawEntries = await zipModel.getEntries(archive.blob, {});
+  if (!Array.isArray(rawEntries) || rawEntries.length > limits.maxEntries) {
+    throw new Error("Archive entry limit exceeded");
+  }
+
+  let executableFiles = 0;
+  let declaredExecutableBytes = 0;
+  for (const rawEntry of rawEntries) {
+    const filename =
+      typeof rawEntry.filename === "string" ? rawEntry.filename : "";
+    const directory = rawEntry.directory === true;
+    if (directory || !isExecutableModFilename(filename)) {
+      continue;
+    }
+    executableFiles += 1;
+    const declaredBytes =
+      Number.isSafeInteger(rawEntry.uncompressedSize) &&
+      (rawEntry.uncompressedSize as number) >= 0
+        ? (rawEntry.uncompressedSize as number)
+        : limits.maxExecutableBytes + 1;
+    declaredExecutableBytes += declaredBytes;
+    if (
+      executableFiles > limits.maxExecutableFiles ||
+      declaredBytes > limits.maxExecutableBytes ||
+      declaredExecutableBytes > limits.maxTotalExecutableBytes
+    ) {
+      throw new Error("Executable source limit exceeded");
+    }
+  }
+
+  const result: LegacyModArchiveEntry[] = [];
+  let actualExecutableBytes = 0;
+  for (const rawEntry of rawEntries) {
+    const filename =
+      typeof rawEntry.filename === "string" ? rawEntry.filename : "";
+    const directory = rawEntry.directory === true;
+    const declaredBytes =
+      Number.isSafeInteger(rawEntry.uncompressedSize) &&
+      (rawEntry.uncompressedSize as number) >= 0
+        ? (rawEntry.uncompressedSize as number)
+        : 0;
+    if (directory || !isExecutableModFilename(filename)) {
+      result.push(
+        Object.freeze({
+          filename,
+          directory,
+          uncompressedBytes: declaredBytes,
+        }),
+      );
+      continue;
+    }
+
+    const blobUrl = await zipModel.getURL(rawEntry, {
+      password: undefined,
+    });
+    let sourceBlob: Blob;
+    try {
+      const response = await fetch(blobUrl);
+      if (!response.ok) {
+        throw new Error(`Could not read ${filename}`);
+      }
+      sourceBlob = await response.blob();
+    } finally {
+      try {
+        URL.revokeObjectURL(blobUrl);
+      } catch {
+        // Revocation is cleanup only; validation still uses the fetched copy.
+      }
+    }
+    if (
+      sourceBlob.size > limits.maxExecutableBytes ||
+      sourceBlob.size > limits.maxTotalExecutableBytes
+    ) {
+      throw new Error("Executable source limit exceeded");
+    }
+    actualExecutableBytes += sourceBlob.size;
+    if (actualExecutableBytes > limits.maxTotalExecutableBytes) {
+      throw new Error("Executable source limit exceeded");
+    }
+    result.push(
+      Object.freeze({
+        filename,
+        directory: false,
+        uncompressedBytes: sourceBlob.size,
+        source: await sourceBlob.text(),
+      }),
+    );
+  }
+  return Object.freeze(result);
+}
+
+function isPromiseLike(
+  value: unknown,
+): value is PromiseLike<unknown> {
+  return (
+    (typeof value === "object" || typeof value === "function") &&
+    value !== null &&
+    typeof (value as { readonly then?: unknown }).then === "function"
+  );
+}
+
+function isDisposedTranslationStatus(
+  value: LegacyModTranslationStatus,
+): boolean {
+  return value.state === "disposed";
+}
+
 function translation(
   api: string,
   effect: KDApiEffect,
@@ -1114,7 +1785,11 @@ function profileStatus(
 ): LegacyModTranslationProfileStatus {
   const effects = [
     ...new Set(
-      value.recognizedApis.map((api) => API_TRANSLATIONS[api].effect),
+      value.recognizedApis.map(
+        (api) =>
+          translateOfficialKDApi(api)?.effect ??
+          ("game-state-write" satisfies KDApiEffect),
+      ),
     ),
   ];
   return Object.freeze({

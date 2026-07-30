@@ -70,6 +70,7 @@ await copyWasm("wasm-nomod", resolve(modOutput, "wasm"), ["kd_hybrid_core_bg.was
 
 const legalFiles = [
   ["LICENSE", "LICENSES/MIT.txt"],
+  ["LICENSES/ACORN-MIT.txt", "LICENSES/ACORN-MIT.txt"],
   ["LICENSES/MPL-2.0.txt", "LICENSES/MPL-2.0.txt"],
   ["NOTICE.md", "NOTICE.txt"],
   [

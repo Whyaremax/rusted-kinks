@@ -35,3 +35,22 @@ The native C++/Qt replacement lives under `native/manager` and is the preferred
 release interface. This PowerShell kit remains a transparent fallback.
 Generated release contents are intentionally ignored by Git; source, templates,
 licensing rules, and the builder remain tracked.
+
+## Ready-to-copy override
+
+To create a command-free folder override for an ordinary unmodified KD 5.4.92
+installation:
+
+```powershell
+npm run package:override -- --app-root "C:\Path\To\Kinky Dungeon"
+```
+
+The ZIP directly mirrors the destination paths:
+`resources/app/index.html`, `resources/app/out/main.js`, and
+`resources/app/kd-hybrid/`. Users close the game and merge the included
+`resources` folder onto the folder containing `KinkyDungeon.exe`.
+
+The builder stages the verified source transformation, checks the exact
+resulting hash, and verifies that the source installation remains unchanged.
+It excludes `.kd-hybrid`, backups, and any `RESTORE` tree, so the clean
+upstream `index.html` and `out/main.js` are never included.

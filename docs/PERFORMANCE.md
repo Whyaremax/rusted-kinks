@@ -3629,6 +3629,47 @@ Evidence:
   `mapgen-mod-translator-v1-final-bundle-smoke.json`,
   `47A56BAD094A2542EE1867250D766CEEC8DF82901B8BD2234F8BCBF32E058E33`.
 
+### Content-recognized official API expansion
+
+The exact-profile gate now has a conservative content path for normal KD mod
+archives. It uses KD's ZIP reader, parses executable source with Acorn without
+evaluating it, and recognizes calls from the reviewed effect table plus the
+exact build's pre-mod KD function snapshot. Dynamic code, prototype mutation,
+unknown KD calls, and writes that can invalidate any accepted source fast path
+reject the complete selected set.
+
+The final installed-build gate used exact bytes from the normal `Mods` folder.
+Arcanox Cute Effects 2.8.12, EarPlugs Redux 0.4, and the Himiko female-voice
+pack produced three `content-inspected` profiles, enabled all eight source
+optimizations, loaded all 350 ZIP entries exactly, and recorded one optimized
+map with zero translated fallback maps. Their model/text, restraint/event, and
+voice/input hooks were present; a 51x37 map generated in 181.2 ms, three turns
+completed, and a manual Pixi render passed with no executable-script or page
+errors.
+
+The complete 15-archive installed set loaded all 971 entries exactly. KD4K's
+intentional `KDDraw` replacement rejected the set as
+`content-source-sensitive-write:KDDraw`; observed source calls all used their
+official JavaScript branches. The same process generated a 51x37 map, advanced
+three turns, and rendered successfully with no executable-script or page
+errors. A separate Logical District Mapgen control rejected
+`KDMapTilesPopulate` and completed the same map/turn/render gate.
+
+The supplied EarPlugs archive originally had an extra top-level directory, a
+nonexistent file-order entry, and an atlas image path that could not resolve.
+After repairing that archive layout, its final gate reported zero loader or
+resource errors, registered all eleven restraints, cached the atlas texture,
+and loaded the 2480x3508 Isolation Headphones model.
+
+Evidence:
+
+- compatible official-API set:
+  `artifacts/live-mod-api-compatibility-earplugs-repaired.json`;
+- complete installed mod set:
+  `artifacts/live-mod-api-compatibility-full-normal-set.json`;
+- source-replacement negative control:
+  `artifacts/live-mod-api-compatibility-source-replacement-control.json`.
+
 ## Release packaging: source patch v6
 
 Final release cleanup promotes the accepted v67 bundle into one immutable,

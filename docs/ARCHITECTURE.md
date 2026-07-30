@@ -323,9 +323,26 @@ select KD's own full or mobile startup atlas, then restores the original
 writes the saved toggle, wraps `PIXI.Assets.load`, changes displacement links,
 or evicts live Pixi resources. Its memory sampler walks the existing Pixi/KD
 caches read-only and deduplicates by base-texture identity. `rendering.ts` is a
-thin integration adapter; browser storage and Pixi inspection remain
-TypeScript because a WASM round trip would add overhead to two boundary reads,
-while repeated compute stays a Rust/WASM concern.
+thin integration adapter for that policy and `frame-pacing.ts`.
+
+The frame pacer is also deliberately TypeScript at the Pixi boundary. On the
+exact KD 5.4.92 bundle and Pixi 7.2.1, it preserves the original renderer
+property descriptor, then intercepts only calls whose display object is the
+current `PIXIapp.stage`. Input/focus activity renders every request; idle,
+unfocused, and hidden profiles use deadline-based 60, 30, and 10 FPS ceilings.
+The deadline advances from its scheduled time rather than the last physical
+render, so a 144 Hz request stream averages 60 FPS instead of quantizing down
+to 48 FPS. Calls for render textures or any other display object bypass pacing
+and retain the original receiver, arguments, return value, and exception
+behavior.
+
+The pacer fails closed on unknown game, bundle, or Pixi versions. It also
+exposes a live disable switch and detects a later renderer replacement.
+Disposal restores the exact prior property shape when the pacer still owns the
+slot and never overwrites a later mod wrapper. Browser storage, Pixi
+inspection, and frame submission stay in TypeScript because a WASM round trip
+would only add overhead at those boundaries, while repeated compute stays a
+Rust/WASM concern.
 
 ## Release gate
 

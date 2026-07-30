@@ -52,6 +52,70 @@ facades, so `systemStatus("mapGeneration")` is a convenient summary rather
 than a complete list; use `systemStatus()` and filter by `system` for detailed
 diagnostics.
 
+## Audited legacy-mod translation
+
+KD Hybrid does not compile arbitrary `.js` or `.ks` code into WebAssembly.
+Legacy scripts still execute through KD's official loader, and their callbacks,
+RNG calls, UI work, and gameplay writes remain JavaScript-authoritative.
+
+The bootstrap can instead prove that an archive does not invalidate selected
+source fast paths. Exact reviewed hashes retain their audited profiles. Other
+archives are read through KD's own ZIP model and every `.js`/`.ks` entry is
+parsed without being evaluated. The analyzer recognizes calls from a reviewed
+API-effect table plus the exact build's KD global-function snapshot, tracks
+standard event-table registrations, and verifies the exact ZIP-entry list
+after KD's loader finishes:
+
+- read-only and UI calls need no native state;
+- `KDRandom` remains in JavaScript so RNG consumption and order stay exact;
+- `KinkyDungeonMapSet` and related grid writes change `KDMapData.Grid`, which
+  the native path adapter observes before reusing a snapshot;
+- effect-tile, entity, and buff writes remain in JavaScript and are recaptured
+  at the next relevant native boundary; and
+- event dispatch and registered callbacks continue through KD's JavaScript
+  event tables.
+
+This proof is used by the reversible early/source-patched installation. The
+portable normal-mod ZIP does not alter KD's source bundle, so it has no source
+guard to unlock and continues using its ordinary runtime adapter gates.
+
+For a compatible set, only the broad "a mod is loaded" source guard is
+translated during one official `KinkyDungeonCreateMap` transaction. The real
+`KDModsLoaded` and `KDAllModFiles` bindings are restored in `finally`; mod
+registries, handlers, assets, and scripts are never removed or rewritten.
+
+Content inspection fails closed for a source-fast-path replacement, built-in
+or prototype mutation, dynamic global write, `eval`/`Function`-style dynamic
+code, unknown KD call, parse failure, unsafe path, or duplicate entry. This is
+a compatibility proof, not a sandbox: accepted scripts still run as ordinary
+JavaScript in the official loader. The exact-build API snapshot is captured
+synchronously before the first selected mod can execute, so one mod cannot
+teach the analyzer a new API for a later archive.
+
+The current audited profiles are:
+
+| Archive | Version | SHA-256 |
+| --- | --- | --- |
+| Useful Tooltips | 1.33 | `d529b818ce537c5989190957b3f97e2965c231186f65a67fc7afaab0b3136cfe` |
+| Prisoner Revaluation | 1.14 | `43218198e3920546ab1bdb822f0aedc43560852a3fae22d5b0bcd34fc063c16d` |
+| Breach Explosives | supplied as 1.04; manifest says 1.03 | `7f725792050d4f7457dbe2445abf3df2347c89ed61420b1b11a2d76052b42354` |
+
+Renaming an otherwise byte-identical ZIP is harmless. Repacking, editing, or
+updating it loses the exact profile but can still earn a `content-inspected`
+profile if every executable entry passes the policy. Asset-only archives are
+accepted without decompressing their assets. Inspection is bounded to 64
+archives, 128 MiB per archive, 512 MiB total, 8,192 entries per archive,
+32,768 entries total, 256 executable files per archive, 1,024 executable files
+total, 4 MiB per executable, and 64 MiB of executable source total.
+
+Duplicate archives, unexpected loaded entries, failed digests, malformed ZIPs,
+and invalid or oversized input fail closed without blocking KD's loader. If
+any archive in a selected set is unsafe, the whole set keeps normal JavaScript
+fallback; it does not receive a partial source-fast-path proof.
+
+`KDHybridRuntimeControl.disableTranslatedModSourceOptimizations = true` is the
+isolated-test A/B switch. It is a developer control, not a stable mod API.
+
 ## Hooks
 
 ```js
@@ -129,7 +193,7 @@ The allowed capability names are:
 - `diagnostics`; and
 - `deterministic-random`.
 
-In 0.1.0, capability callbacks are not wired into the public KD runtime yet.
+In 0.1.1, capability callbacks are not wired into the public KD runtime yet.
 The host rejects a module that imports an unavailable callback instead of
 silently returning fake data. `receive-events` and `path-query` are reserved
 manifest declarations and do not automatically subscribe or route calls.

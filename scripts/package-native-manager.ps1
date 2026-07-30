@@ -94,6 +94,8 @@ $licenseRoot = Join-Path $stageRoot "licenses"
 New-Item -ItemType Directory -Path $licenseRoot -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $repoRoot "LICENSE") `
     -Destination (Join-Path $licenseRoot "KD-Hybrid-MIT.txt")
+Copy-Item -LiteralPath (Join-Path $repoRoot "LICENSES\ACORN-MIT.txt") `
+    -Destination (Join-Path $licenseRoot "ACORN-MIT.txt")
 Copy-Item -LiteralPath (Join-Path $repoRoot "LICENSES\MPL-2.0.txt") `
     -Destination (Join-Path $licenseRoot "MPL-2.0.txt")
 Copy-Item -LiteralPath (Join-Path $repoRoot "NOTICE.md") `

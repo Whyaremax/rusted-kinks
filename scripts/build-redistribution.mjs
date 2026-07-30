@@ -65,6 +65,10 @@ await Promise.all([
   ),
   cp(path.join(root, "LICENSE"), path.join(kitRoot, "LICENSES", "MIT.txt")),
   cp(
+    path.join(root, "LICENSES", "ACORN-MIT.txt"),
+    path.join(kitRoot, "LICENSES", "ACORN-MIT.txt"),
+  ),
+  cp(
     path.join(root, "LICENSES", "MPL-2.0.txt"),
     path.join(kitRoot, "LICENSES", "MPL-2.0.txt"),
   ),

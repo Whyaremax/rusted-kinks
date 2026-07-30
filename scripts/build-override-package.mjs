@@ -212,6 +212,7 @@ async function auditOverride(files, releaseRootPath, original) {
     "resources/app/index.html",
     "resources/app/out/main.js",
     "resources/app/kd-hybrid/NOTICE.txt",
+    "resources/app/kd-hybrid/LICENSES/ACORN-MIT.txt",
     "resources/app/kd-hybrid/LICENSES/MIT.txt",
     "resources/app/kd-hybrid/LICENSES/MPL-2.0.txt",
     "resources/app/kd-hybrid/SOURCE.txt",

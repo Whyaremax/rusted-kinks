@@ -16,6 +16,7 @@ const MAX_ARCHIVE_INPUT_BYTES = 128 * 1024 * 1024;
 const REQUIRED_PAYLOAD_FILES = [
   "KDHybrid.js",
   "wasm/kd_hybrid_core_bg.wasm",
+  "LICENSES/ACORN-MIT.txt",
   "LICENSES/MIT.txt",
   "LICENSES/MPL-2.0.txt",
   "NOTICE.txt",

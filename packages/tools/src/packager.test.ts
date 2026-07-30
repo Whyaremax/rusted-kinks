@@ -26,6 +26,7 @@ describe("portable mod packager", () => {
         Uint8Array.of(0, 97, 115, 109)
       );
       for (const file of [
+        "LICENSES/ACORN-MIT.txt",
         "LICENSES/MIT.txt",
         "LICENSES/MPL-2.0.txt",
         "NOTICE.txt",
@@ -51,6 +52,7 @@ describe("portable mod packager", () => {
       expect(manifest.modname).toBe("KDHybrid");
       expect(manifest.fileorder.at(-1)).toBe("KDHybrid.js");
       expect(Object.keys(archive)).toContain("wasm/kd_hybrid_core_bg.wasm");
+      expect(Object.keys(archive)).toContain("LICENSES/ACORN-MIT.txt");
       expect(Object.keys(archive)).toContain("LICENSES/MPL-2.0.txt");
       expect(Object.keys(archive)).toContain(
         "source/MPL-2.0/upstream-patches/kd-5.4.92/source-optimizations-v6.patch"

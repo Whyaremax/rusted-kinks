@@ -47,7 +47,12 @@ What exists today: (yaps) [installation](https://github.com/Whyaremax/rusted-kin
 - an exact-build-gated texture policy that selects KD's official mobile atlas
   on the balanced tier, reports decoded texture memory, and preserves full and
   original escape hatches without changing Pixi's loader;
+- exact-build-gated adaptive GPU frame pacing that keeps input at the display
+  cadence, reduces idle stage rendering to 60 FPS, and leaves render textures
+  and simulation cadence untouched;
 - compatibility fallbacks for calls the native path cannot safely handle;
+- content-inspected compatibility for normal mods that stay within recognized
+  official KD APIs, with source-replacing or dynamic mods kept on JavaScript;
 - pathfinding stress and paired crowded-turn tests against the real KD Electron
   build; and
 - a capability-gated WASM plugin host ready for the mod SDK to grow into.
@@ -92,6 +97,15 @@ loop. Another slice removes one throwaway array allocation per cached path
 point. Its matched 12-map gate fell from 69.87 seconds to 67.81 seconds, with
 every layout exact; array subclasses and changed `slice` methods keep KD's
 original loop.
+
+Rendering now has a measured browser-boundary optimization as well. In the
+120-enemy live gate, adaptive idle pacing reduced actual WebGL
+`drawElements`, clear, and flush submissions by 50.08% while
+`requestAnimationFrame` remained at 120 FPS with an 8.5 ms p99. A real pointer
+event restored every requested render immediately, the fixed scene matched
+8,000,000/8,000,000 pixels exactly, and a populated render-texture pass
+bypassed pacing unchanged. The live escape hatch is
+`KDHybridRuntimeControl.disableGpuFramePacing`.
 
 The full optimization history, rejected candidates, report hashes, and
 reproduction commands are in [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
@@ -155,7 +169,9 @@ Here is what the useful commands make:
 | `npm run build` | The Rust/WASM core and JavaScript bootstrap under `dist/` |
 | `npm run package` | A portable bootstrap ZIP at `artifacts/kd-hybrid.zip` |
 | `npm run redistribute` | An unpacked patcher kit, setup ZIP, and checksums under `redistribution/releases/` |
+| `npm run package:override -- --app-root <game>` | A ready-to-copy `resources/app/...` override ZIP with no clean KD backup |
 | `npm run verify:textures -- --app-root <resources/app>` | Official full/mobile atlas coverage, geometry, and decoded-byte report |
+| `npm run verify:frame-pacing -- --port <cdp-port>` | Live control/candidate GPU-command, cadence, pixel, activity, and render-texture gate |
 
 To install from the unpacked kit:
 
@@ -178,6 +194,13 @@ bootstrap.
 
 If you only want the portable bootstrap payload for development, run
 `npm run package`; it writes `artifacts/kd-hybrid.zip`.
+
+For a command-free manual override, run `npm run package:override` with a clean
+KD 5.4.92 installation. The ZIP directly contains patched
+`resources/app/index.html`, patched `resources/app/out/main.js`, and
+`resources/app/kd-hybrid/...`; users can merge that `resources` folder over an
+ordinary unmodified install. It deliberately contains no clean backup or
+`RESTORE` tree.
 
 The source patcher CLI accepts `--texture-mode auto|original|full|mobile` on
 `install` and `configure`. `auto` uses the memory-safe official mobile atlas
