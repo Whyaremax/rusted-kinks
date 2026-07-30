@@ -2,119 +2,12 @@
 
 Rusted Kinks, rewrite of Kinky Dungeon by Ada in, well rust. I thought of this when I’m in middle of businesses.
 
-The idea is simple: move expensive, repeatable work into Rust/WebAssembly while
-keeping the Electron/Pixi interface, original JavaScript behavior, and modding
-scene intact. Keep the original kink; just make it run better. If Doom can run
-on a pregnancy test, then my kinks can be smoother.
-
-It stays hybrid on purpose. The fast path handles work it understands, and the
-original JavaScript takes over when a mod replaces a function, KD updates, or a
-call does not fit the native adapter. That keeps normal JavaScript mods useful
-while letting the expensive parts move somewhere faster.
-
 ## Where it is now
 
-This is early alpha, but it is not vaporware. The build, patching, fallback,
+This is early alpha, but it is not scam. The build, patching, fallback,
 and testing pipelines are alive. The current source includes the accepted
 pathfinding, crowded-turn, map-generation, texture, and compatibility work
 described below.
-
-What exists today: (yaps) [installation](https://github.com/Whyaremax/rusted-kinks/tree/main#installing-a-release)
-
-- a deterministic Rust core compiled to WebAssembly;
-- a binary protocol, snapshots, spatial indexing, and three pathfinding modes;
-- dense nearby-enemy, rank-first master, and fused hostile-target lookups for
-  crowded turns that keep original game objects in JavaScript;
-- a batched enemy-movement position cache that avoids rebuilding the whole
-  lookup map after every ordinary move;
-- a bounded cell-change journal that patches the dense nearby/master indices
-  after those moves instead of rebuilding either index;
-- a conservative commander shortcut that skips empty rescue searches;
-- a guarded jail-key shortcut that avoids rescanning the whole map when all
-  keys are already placed;
-- a map-generation boundary that avoids sending thousands of transient grids
-  through WASM, plus a guarded enemy-selector scan that keeps KD's exact RNG
-  and catalog order;
-- a small, hash-gated source patch that removes wrapper overhead from the
-  proven nearest-player optimization, short-circuits healthy unbound NPC
-  helpless checks, skips repeated empty buff-event scans, and shortens eligible
-  restraint tag scans and path-cache suffix writes;
-- a signature-gated bootstrap that only activates on recognized game builds;
-- reversible TypeScript, PowerShell, and native C++/Qt patchers that back up
-  both files they may change;
-- an isolated developer installation that does not share the normal save
-  directory;
-- an exact-build-gated texture policy that selects KD's official mobile atlas
-  on the balanced tier, reports decoded texture memory, and preserves full and
-  original escape hatches without changing Pixi's loader;
-- exact-build-gated adaptive GPU frame pacing that keeps input at the display
-  cadence, reduces idle stage rendering to 60 FPS, and leaves render textures
-  and simulation cadence untouched;
-- compatibility fallbacks for calls the native path cannot safely handle;
-- content-inspected compatibility for normal mods that stay within recognized
-  official KD APIs, with source-replacing or dynamic mods kept on JavaScript;
-- a genuine KD control mod that appears in KD's own mod list and configuration
-  screen, then forwards only validated Hybrid settings to the early host;
-- pathfinding stress and paired crowded-turn tests against the real KD Electron
-  build; and
-- a capability-gated WASM plugin host ready for the mod SDK to grow into.
-
-In a focused KD 5.4.92 benchmark, the pathfinding adapter ran the tested path
-1.824x as fast as the original function and returned the same result.
-
-The integrated crowded-turn gate reduced the median three-turn fixture from
-53.60 ms to 29.20 ms, a 1.846x median paired speedup across 20 pairs. The separate
-Maidforce prison-escort fixture measured 63.10 ms versus 36.30 ms and a 1.709x
-paired-median speedup, again with exact final state.
-
-The nearest-player slice now also has a direct source form against the exact
-public KD 5.4.92 revision. In its focused 20-pair gates it measured 1.058x in
-combat, 1.156x in the crowded room, and 1.249x in prison, while preserving
-packed/custom/mod fallback behavior. It also beat the equivalent runtime
-wrapper in all 20 head-to-head pairs.
-
-The source patch also gives `KDHelpless` a narrow fast negative for healthy,
-unbound, unpacked NPCs. On final 20-pair gates it reduced the median by 5.45%
-in hostile combat, 2.95% in the crowded room, and 2.10% in prison. Injured,
-bound, packed, player, and helper-modified cases keep the original body.
-
-The same source patch now includes an adaptive negative buff-event index. In
-the hostile-combat gate it reduced a two-turn median from 31.30 ms to 26.90 ms,
-a 1.163x paired-median speedup with all 20 pairs faster and exact final state.
-It stayed neutral in the crowded fixture and slightly positive in prison. Mods
-using the standard buff API are tracked automatically; direct same-tick writes
-can call `KDHybridInvalidateBuffEventIndex()`, and each source optimization has
-an independent compatibility switch.
-
-Map generation has its first three measured fixes too. Generation-time path
-queries now stay on KD's faster official JavaScript implementation while the
-grid is changing. The final packaged enemy-selector adapter reduced a matched
-12-map run from 66.56 seconds to 65.88 seconds, with all 12 layouts and
-1,749,802 path calls exact. If a mod changes the selector's dependencies, that
-call goes straight back to the official function before RNG is consumed.
-An earlier source slice reduced an adjacent 12-map restraint-selection run
-from 71.99 seconds to 69.01 seconds. Its hot function fell from 7.31 seconds
-to 2.52 seconds, while replaced tag tables and Map helpers kept the original
-loop. Another slice removes one throwaway array allocation per cached path
-point. Its matched 12-map gate fell from 69.87 seconds to 67.81 seconds, with
-every layout exact; array subclasses and changed `slice` methods keep KD's
-original loop.
-
-Rendering now has a measured browser-boundary optimization as well. In the
-120-enemy live gate, adaptive idle pacing reduced actual WebGL
-`drawElements`, clear, and flush submissions by 50.08% while
-`requestAnimationFrame` remained at 120 FPS with an 8.5 ms p99. A real pointer
-event restored every requested render immediately, the fixed scene matched
-8,000,000/8,000,000 pixels exactly, and a populated render-texture pass
-bypassed pacing unchanged. The live escape hatch is
-`KDHybridRuntimeControl.disableGpuFramePacing`.
-
-The full optimization history, rejected candidates, report hashes, and
-reproduction commands are in [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
-
-Deeper movement and AI work, positive buff dispatch, combat arithmetic,
-additional world generation, persistent asset caching, and audio handling come
-later, one measured slice at a time.
 
 ## Installing a release
 
@@ -163,18 +56,6 @@ npm run redistribute
 `wasm-pack --version` already works. If Cargo installs it successfully but the
 command is still missing, reopen PowerShell or add
 `$env:USERPROFILE\.cargo\bin` to that shell's `PATH`.
-
-Here is what the useful commands make:
-
-| Command | Result |
-| --- | --- |
-| `npm run check` | TypeScript tests, Rust tests, and type checking |
-| `npm run build` | The Rust/WASM core and JavaScript bootstrap under `dist/` |
-| `npm run package` | A portable bootstrap ZIP at `artifacts/kd-hybrid.zip` |
-| `npm run redistribute` | An unpacked patcher kit, setup ZIP, and checksums under `redistribution/releases/` |
-| `npm run package:override -- --app-root <game>` | A ready-to-copy game-folder override ZIP with patched `resources/app/...` files and the control mod |
-| `npm run verify:textures -- --app-root <resources/app>` | Official full/mobile atlas coverage, geometry, and decoded-byte report |
-| `npm run verify:frame-pacing -- --port <cdp-port>` | Live control/candidate GPU-command, cadence, pixel, activity, and render-texture gate |
 
 To install from the unpacked kit:
 
@@ -252,35 +133,12 @@ performance layer, patcher, tests, and a small reviewable source diff against
 the [public KD source](https://github.com/Ada18980/KinkiestDungeon). It does not
 ship the complete upstream source tree, game executable, art, audio, or saves.
 
-### Will normal KD mods still work?
-
-That is one of the main reasons this stays hybrid. Existing mods can keep using
-JavaScript. If a mod replaces a function or uses arguments the native adapter
-does not support, that call stays on the original JavaScript path. The manager
-installs only KD Hybrid's own control ZIP and leaves every other mod alone. If
-KD's `Auto Load Mods` option is off, the early bootstrap registers only that
-owned control ZIP through KD's normal loader; it does not load or execute any
-other archive.
-
 ### Does this touch my saves?
 
 No. The patcher changes its verified files under `resources/app` and owns one
 exact `Mods/KDHybridBridge.zip` file beside the game. It does not open
 Electron's save/profile directory. Development tests use a separate
 `user-data` folder too.
-
-### Is this a full native rewrite?
-
-No. Rust/WASM is used where it earns its keep. The UI, renderer, mod-facing
-state, and plenty of game logic remain JavaScript unless moving them provides a
-measurable benefit without breaking compatibility.
-
-### Why Rust and WebAssembly?
-
-Rust gives the hot code predictable performance and strong memory safety, while
-WASM fits directly into Electron and still leaves JavaScript in charge of the
-mod-facing boundary. A native C++ manager is used for patching and deployment,
-where a normal desktop executable is more convenient.
 
 ### Which KD versions are supported?
 
@@ -305,22 +163,6 @@ Use **Uninstall** in the manager, or run the generated PowerShell patcher with
 either file. It also verifies and removes its own control-mod ZIP. A changed or
 replaced bridge ZIP is refused rather than deleted.
 
-## Roadmap
-
-The short version:
-
-1. keep pathfinding and crowded-turn lookups genuinely faster and boringly
-   reliable;
-2. migrate deeper movement, broader AI, combat, buffs, and event batching in
-   useful slices;
-3. build capture, prison, map-generation, and long-run fixtures;
-4. improve startup and asset loading;
-5. make the mod SDK pleasant enough that other people can extend the native
-   side without forking everything; and
-6. ship a stable manager and release package that people can undo just as
-   easily as they installed it.
-
-The less hand-wavy version is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Contributing and bugs
 
