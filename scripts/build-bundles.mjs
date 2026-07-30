@@ -54,7 +54,9 @@ await Promise.all([
     }
   }),
   build({
-    entryPoints: [resolve(root, "packages/bootstrap/src/control-mod.ts")],
+    entryPoints: [
+      resolve(root, "packages/bootstrap/src/control-mod-entry.ts")
+    ],
     outfile: controlModEntryOutput,
     bundle: true,
     format: "iife",

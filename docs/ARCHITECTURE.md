@@ -66,8 +66,12 @@ the standard `KDModConfigs` and `KDModSettings` APIs. No bootstrap code wraps or
 replaces the mod-list drawing function.
 
 The early bootstrap publishes a deliberately small `KDHybridModBridge` host
-before KD loads mods. The control mod may read status and submit only three
-validated values: pathfinding mode, texture mode, and adaptive frame pacing.
+before KD loads mods. When KD's `Auto Load Mods` option is disabled, the
+bootstrap asks KD's official filesystem API for the exact owned archive and
+passes only that file to `KDLoadMod`. This registers the row and settings
+without invoking `KDExecuteMods` or loading any unrelated archive. The control
+mod may read status and submit only three validated values: pathfinding mode,
+texture mode, and adaptive frame pacing.
 Pathfinding and pacing apply immediately. Texture selection is a startup
 decision, so a changed texture setting is persisted and reported as requiring a
 restart. Invalid types or enum values are rejected at the boundary.

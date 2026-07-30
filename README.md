@@ -257,7 +257,10 @@ ship the complete upstream source tree, game executable, art, audio, or saves.
 That is one of the main reasons this stays hybrid. Existing mods can keep using
 JavaScript. If a mod replaces a function or uses arguments the native adapter
 does not support, that call stays on the original JavaScript path. The manager
-installs only KD Hybrid's own control ZIP and leaves every other mod alone.
+installs only KD Hybrid's own control ZIP and leaves every other mod alone. If
+KD's `Auto Load Mods` option is off, the early bootstrap registers only that
+owned control ZIP through KD's normal loader; it does not load or execute any
+other archive.
 
 ### Does this touch my saves?
 

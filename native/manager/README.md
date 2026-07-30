@@ -13,7 +13,8 @@ The manager:
 - applies the exact hash-gated KD 5.4.92 source optimization;
 - backs up and atomically updates both `index.html` and `out/main.js`;
 - installs `Mods/KDHybridBridge.zip`, which KD recognizes through its normal
-  mod list and uses to render Hybrid settings in the normal configuration UI;
+  mod list and uses to render Hybrid settings in the normal configuration UI,
+  even when KD's general `Auto Load Mods` option is disabled;
 - installs and changes the `quality`, `fast`, or `human` pathfinding mode and
   the `auto`, `original`, `full`, or `mobile` texture policy without replacing
   the original backup;

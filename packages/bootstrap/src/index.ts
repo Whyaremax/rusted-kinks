@@ -31,6 +31,10 @@ import {
   type KinkyDungeonModBridgeHostHandle
 } from "./mod-bridge-host.js";
 import {
+  installKinkyDungeonControlModDiscovery,
+  type KinkyDungeonControlModDiscoveryHandle
+} from "./control-mod-discovery.js";
+import {
   installKinkyDungeonStartup,
   type KinkyDungeonStartupHandle
 } from "./startup.js";
@@ -52,6 +56,7 @@ export interface BootstrapHandle {
   readonly startup: KinkyDungeonStartupHandle;
   readonly modTranslator: KinkyDungeonModTranslatorHandle;
   readonly modBridge: KinkyDungeonModBridgeHostHandle;
+  readonly controlModDiscovery: KinkyDungeonControlModDiscoveryHandle;
   readonly nativeReady: Promise<boolean>;
   dispose(): void;
 }
@@ -124,6 +129,7 @@ export function installBootstrap(): BootstrapHandle {
       adaptiveFramePacing: framePacingMode === "adaptive"
     }
   });
+  const controlModDiscovery = installKinkyDungeonControlModDiscovery();
   const stopFrames = monitorFrames(runtime, rendering);
   const stopQuality = applyQualityHints(runtime, rendering);
   const nativeReady = loadNative(runtime)
@@ -158,10 +164,12 @@ export function installBootstrap(): BootstrapHandle {
     startup,
     modTranslator,
     modBridge,
+    controlModDiscovery,
     nativeReady,
     dispose: () => {
       stopFrames();
       stopQuality();
+      controlModDiscovery.dispose();
       modBridge.dispose();
       rendering.dispose();
       startup.dispose();
