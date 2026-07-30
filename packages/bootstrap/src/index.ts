@@ -26,6 +26,11 @@ import {
   type KinkyDungeonModTranslatorHandle
 } from "./mod-api-translator.js";
 import {
+  installKinkyDungeonModUi,
+  readPersistedKDHybridModSettings,
+  type KinkyDungeonModUiHandle
+} from "./mod-ui.js";
+import {
   installKinkyDungeonStartup,
   type KinkyDungeonStartupHandle
 } from "./startup.js";
@@ -46,6 +51,7 @@ export interface BootstrapHandle {
   readonly rendering: KinkyDungeonRenderingHandle;
   readonly startup: KinkyDungeonStartupHandle;
   readonly modTranslator: KinkyDungeonModTranslatorHandle;
+  readonly modUi: KinkyDungeonModUiHandle;
   readonly nativeReady: Promise<boolean>;
   dispose(): void;
 }
@@ -62,9 +68,24 @@ export function installBootstrap(): BootstrapHandle {
   const modTranslator = installKinkyDungeonModTranslator();
   const startup = installKinkyDungeonStartup();
   const config = globalThis.KDHybridBootstrapConfig;
+  const persistedModSettings = readPersistedKDHybridModSettings();
+  const pathfindingMode =
+    persistedModSettings.pathfindingMode ??
+    config?.pathfindingMode ??
+    "fast";
+  const textureMode =
+    persistedModSettings.textureMode ??
+    config?.rendering?.textureMode ??
+    (config?.quality === "high" ? "full" : "mobile");
+  const framePacingMode =
+    persistedModSettings.adaptiveFramePacing === undefined
+      ? (config?.rendering?.framePacingMode ?? "adaptive")
+      : persistedModSettings.adaptiveFramePacing
+        ? "adaptive"
+        : "off";
   const runtime = new KDHybridRuntime({
     qualityMode: config?.quality ?? "auto",
-    pathfindingMode: config?.pathfindingMode ?? "fast",
+    pathfindingMode,
     ...(config?.upstreamVersion === undefined
       ? {}
       : { upstreamVersion: config.upstreamVersion }),
@@ -85,16 +106,23 @@ export function installBootstrap(): BootstrapHandle {
 
   const rendering = installKinkyDungeonRendering({
     tier: runtime.quality.status().tier,
-    textureMode:
-      config?.rendering?.textureMode ??
-      (config?.quality === "high" ? "full" : "mobile"),
-    framePacingMode: config?.rendering?.framePacingMode ?? "adaptive",
+    textureMode,
+    framePacingMode,
     ...(config?.upstreamVersion === undefined
       ? {}
       : { upstreamVersion: config.upstreamVersion }),
     ...(config?.upstreamBundleSha256 === undefined
       ? {}
       : { upstreamBundleSha256: config.upstreamBundleSha256 })
+  });
+  const modUi = installKinkyDungeonModUi({
+    runtime,
+    rendering,
+    initialSettings: {
+      pathfindingMode,
+      textureMode,
+      adaptiveFramePacing: framePacingMode === "adaptive"
+    }
   });
   const stopFrames = monitorFrames(runtime, rendering);
   const stopQuality = applyQualityHints(runtime, rendering);
@@ -129,10 +157,12 @@ export function installBootstrap(): BootstrapHandle {
     rendering,
     startup,
     modTranslator,
+    modUi,
     nativeReady,
     dispose: () => {
       stopFrames();
       stopQuality();
+      modUi.dispose();
       rendering.dispose();
       startup.dispose();
       modTranslator.dispose();
