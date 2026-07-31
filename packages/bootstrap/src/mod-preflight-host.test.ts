@@ -620,6 +620,75 @@ describe("KD mod preflight host", () => {
     expect(environment.readModRegistry()).toBe(registry);
   });
 
+  it("restores registry insertion order when it differs from load priority", async () => {
+    const firstBlob = new Blob(["first"]);
+    const disabledBlob = new Blob(["disabled"]);
+    const lastBlob = new Blob(["last"]);
+    const first = Object.freeze({
+      name: "first.zip",
+      mod: firstBlob,
+      fileorder: Object.freeze([]),
+    });
+    const disabled = Object.freeze({
+      name: "disabled.zip",
+      mod: disabledBlob,
+      fileorder: Object.freeze([]),
+    });
+    const last = Object.freeze({
+      name: "last.zip",
+      mod: lastBlob,
+      fileorder: Object.freeze([]),
+    });
+    const order = Object.freeze([first, disabled, last]);
+    const registry = Object.freeze({
+      "last.zip": lastBlob,
+      "disabled.zip": disabledBlob,
+      "first.zip": firstBlob,
+    });
+    let environment!: MutableEnvironment;
+    const official = vi.fn(async () => {
+      environment.writeModRegistry(
+        Object.freeze({
+          "first.zip": firstBlob,
+          "last.zip": lastBlob,
+        }),
+      );
+      environment.writeModLoadOrder(Object.freeze([first, last]));
+    });
+    environment = createEnvironment(official, order, registry);
+    const handle = installKinkyDungeonModPreflight({
+      environment,
+      scanner: createScanner(
+        new Map([
+          [firstBlob, safeReport("first.zip", DIGEST_A)],
+          [disabledBlob, riskReport("disabled.zip", DIGEST_B, "pathfinding")],
+          [lastBlob, safeReport("last.zip", DIGEST_C)],
+        ]),
+      ),
+      digest: digestFor(
+        new Map([
+          [firstBlob, DIGEST_A],
+          [disabledBlob, DIGEST_B],
+          [lastBlob, DIGEST_C],
+        ]),
+      ),
+      ui: createUi("disable-mod"),
+      applyCompatibilityControls: vi.fn(),
+      target: {},
+    });
+
+    await handle.loaderReady;
+    await environment.readExecuteMods()!();
+
+    expect(environment.readModLoadOrder()).toBe(order);
+    expect(Object.keys(environment.readModRegistry() ?? {})).toEqual([
+      "last.zip",
+      "disabled.zip",
+      "first.zip",
+    ]);
+    expect(environment.readModRegistry()).toBe(registry);
+  });
+
   it("blocks source-sensitive compatibility before eval while source patches are active", async () => {
     const archive = new Blob(["source-risk"]);
     const entry = Object.freeze({

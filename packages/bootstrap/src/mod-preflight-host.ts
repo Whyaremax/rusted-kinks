@@ -1073,11 +1073,49 @@ function mergeFilteredRegistry(
 ): Readonly<Record<string, Blob>> {
   const currentDescriptors = Object.getOwnPropertyDescriptors(current);
   const originalDescriptors = Object.getOwnPropertyDescriptors(original);
-  const descriptors: PropertyDescriptorMap = {};
+  const originalNames = Reflect.ownKeys(original).filter(
+    (key): key is string =>
+      typeof key === "string" &&
+      Object.getOwnPropertyDescriptor(original, key)?.enumerable === true,
+  );
+  const originalNameSet = new Set(originalNames);
+  const restoredByName = new Map(
+    restoredOrder.map((entry) => [entry.name, entry] as const),
+  );
+  const retainedOriginalNames = originalNames.filter((name) => {
+    if (disabledNames.has(name)) {
+      return true;
+    }
+    return currentDescriptors[name]?.enumerable === true;
+  });
+  // KDMods insertion order is independent of KD's sorted load order. Restore
+  // original-name slots from the registry sequence while leaving new entries
+  // in the slots assigned by official evaluation.
+  let originalIndex = 0;
+  const mergedNames: string[] = [];
   for (const entry of restoredOrder) {
-    const descriptor = disabledNames.has(entry.name)
-      ? originalDescriptors[entry.name]
-      : currentDescriptors[entry.name];
+    if (!originalNameSet.has(entry.name)) {
+      mergedNames.push(entry.name);
+      continue;
+    }
+    const originalName = retainedOriginalNames[originalIndex++];
+    if (originalName === undefined) {
+      throw new Error("restored-mod-registry-count-drift");
+    }
+    mergedNames.push(originalName);
+  }
+  if (originalIndex !== retainedOriginalNames.length) {
+    throw new Error("restored-mod-registry-count-drift");
+  }
+  const descriptors: PropertyDescriptorMap = {};
+  for (const name of mergedNames) {
+    const entry = restoredByName.get(name);
+    if (entry === undefined) {
+      throw new Error("restored-mod-registry-count-drift");
+    }
+    const descriptor = disabledNames.has(name)
+      ? originalDescriptors[name]
+      : currentDescriptors[name];
     if (
       descriptor === undefined ||
       !descriptor.enumerable ||
@@ -1086,7 +1124,7 @@ function mergeFilteredRegistry(
     ) {
       throw new Error("restored-mod-registry-entry-invalid");
     }
-    Object.defineProperty(descriptors, entry.name, {
+    Object.defineProperty(descriptors, name, {
       configurable: true,
       enumerable: true,
       value: descriptor,
