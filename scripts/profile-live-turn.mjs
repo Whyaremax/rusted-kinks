@@ -309,6 +309,10 @@ async function main() {
         type: "boolean",
         default: false
       },
+      "diagnose-mixed-divergence": {
+        type: "boolean",
+        default: false
+      },
       interval: { type: "string", default: "100" },
       output: {
         type: "string",
@@ -324,9 +328,9 @@ async function main() {
   const abSamples = parseInteger("ab-samples", values["ab-samples"], 1, 20);
   const abTurns = parseInteger("ab-turns", values["ab-turns"], 1, 20);
   const scenario = values.scenario;
-  if (!["crowded", "prison", "combat"].includes(scenario)) {
+  if (!["crowded", "prison", "combat", "mixed-combat"].includes(scenario)) {
     throw new Error(
-      `scenario must be "crowded", "prison", or "combat"; received ${JSON.stringify(scenario)}`
+      `scenario must be "crowded", "prison", "combat", or "mixed-combat"; received ${JSON.stringify(scenario)}`
     );
   }
   const probeFaction = values["probe-faction"];
@@ -474,6 +478,8 @@ async function main() {
   const probeDynamicPathArray = values["probe-dynamic-path-array"];
   const probeTextureUploadAudit = values["probe-texture-upload-audit"];
   const probeSharedTextureAudit = values["probe-shared-texture-audit"];
+  const diagnoseMixedDivergence =
+    values["diagnose-mixed-divergence"];
   const samplingInterval = parseInteger("interval", values.interval, 50, 10_000);
   const outputPath = path.resolve(values.output);
   const fixtureInputPath =
@@ -500,7 +506,10 @@ async function main() {
   }
 
   const client = await CdpClient.connect(gameTarget.webSocketDebuggerUrl);
+  const diagnostics = installCdpDiagnostics(client);
   try {
+    await client.call("Runtime.enable");
+    await client.call("Log.enable");
     const fixedSeed = "kd-hybrid-crowded-turn-5.4.92";
     let setup = await client.evaluate(
       `(${setupCrowdedTurn.toString()})(${enemyCount}, ${JSON.stringify(fixedSeed)})`,
@@ -521,6 +530,21 @@ async function main() {
     } else if (scenario === "combat" && fixtureInputPath === null) {
       scenarioSetup = await client.evaluate(
         `(${setupCombatTurn.toString()})(${enemyCount})`,
+        120_000
+      );
+      setup = {
+        ...setup,
+        actualEnemies: scenarioSetup.actualEnemies,
+        map: scenarioSetup.map,
+        mapSignature: scenarioSetup.mapSignature
+      };
+    } else if (scenario === "mixed-combat" && fixtureInputPath === null) {
+      await client.evaluate(
+        `(${setupCombatTurn.toString()})(${enemyCount})`,
+        120_000
+      );
+      scenarioSetup = await client.evaluate(
+        `(${setupMixedCombatTurn.toString()})(${enemyCount})`,
         120_000
       );
       setup = {
@@ -550,6 +574,41 @@ async function main() {
         })()`,
         120_000
       );
+    }
+    if (diagnoseMixedDivergence) {
+      if (scenario !== "mixed-combat") {
+        throw new Error(
+          "--diagnose-mixed-divergence requires --scenario mixed-combat"
+        );
+      }
+      diagnostics.reset();
+      const divergence = await diagnoseMixedCombatDivergence(
+        client,
+        Math.min(turnCount, 10)
+      );
+      const report = {
+        schema: 1,
+        generatedAt: new Date().toISOString(),
+        kind: "mixed-combat-divergence",
+        environment: {
+          gameVersion: setup.gameVersion,
+          packageVersion: setup.packageVersion,
+          requestedEnemies: enemyCount,
+          actualEnemies: setup.actualEnemies,
+          scenarioSetup
+        },
+        divergence,
+        consoleAudit: diagnostics.snapshot()
+      };
+      await mkdir(path.dirname(outputPath), { recursive: true });
+      await writeFile(
+        outputPath,
+        `${JSON.stringify(report, null, 2)}\n`,
+        "utf8"
+      );
+      process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+      process.stdout.write(`Report: ${outputPath}\n`);
+      return;
     }
     const nearbyBenchmark =
       setup.ai?.globalName === "KDNearbyEnemies"
@@ -1338,6 +1397,43 @@ async function main() {
       `(${measureHotFunctionCalls.toString()})(${Math.min(turnCount, 10)})`,
       120_000
     );
+    let mixedCombatExercise = null;
+    let mixedCombatConsoleAudit = null;
+    if (scenario === "mixed-combat" && nearbyBenchmark !== null) {
+      diagnostics.reset();
+      const initial = await client.evaluate(
+        `(${restoreCrowdedFixture.toString()})()`,
+        120_000
+      );
+      await client.evaluate('KDHybrid.enableSystem("ai")', 30_000);
+      await client.evaluate('KDHybrid.enableSystem("movement")', 30_000);
+      await client.evaluate('KDHybrid.enableSystem("events")', 30_000);
+      const exercise = await client.evaluate(
+        `(() => {
+          const measure = ${measureMixedCombatExercise.toString()};
+          const run = ${runCrowdedTurns.toString()};
+          const action = ${mixedCombatTurnAction.toString()};
+          return measure(
+            ${Math.min(turnCount, 10)},
+            (turns, includeState) => run(turns, includeState, action)
+          );
+        })()`,
+        120_000
+      );
+      const restored = await client.evaluate(
+        `(${restoreCrowdedFixture.toString()})()`,
+        120_000
+      );
+      mixedCombatExercise = {
+        ...exercise,
+        restoreExact:
+          initial.stateSignature === restored.stateSignature &&
+          initial.stateJson === restored.stateJson,
+        initialStateSignature: initial.stateSignature,
+        restoredStateSignature: restored.stateSignature
+      };
+      mixedCombatConsoleAudit = diagnostics.snapshot();
+    }
     if (probeEventFamilyAudit && nearbyBenchmark !== null) {
       await client.evaluate(`(${restoreCrowdedFixture.toString()})()`, 120_000);
       await client.evaluate('KDHybrid.enableSystem("ai")', 30_000);
@@ -1537,7 +1633,13 @@ async function main() {
     });
     await client.call("Profiler.start");
     const run = await client.evaluate(
-      `(${runCrowdedTurns.toString()})(${turnCount})`,
+      scenario === "mixed-combat"
+        ? `(() => {
+            const run = ${runCrowdedTurns.toString()};
+            const action = ${mixedCombatTurnAction.toString()};
+            return run(${turnCount}, false, action);
+          })()`
+        : `(${runCrowdedTurns.toString()})(${turnCount})`,
       120_000
     );
     const stopped = await client.call("Profiler.stop", undefined, 120_000);
@@ -1569,6 +1671,21 @@ async function main() {
       run.jailKey,
       scenario === "crowded"
     );
+    const consoleAudit = diagnostics.snapshot();
+    const mixedCombatAcceptance = assessMixedCombatFixture(
+      scenario,
+      scenarioSetup,
+      mixedCombatExercise,
+      mixedCombatConsoleAudit
+    );
+    if (mixedCombatAcceptance !== null && !mixedCombatAcceptance.passed) {
+      acceptance.passed = false;
+      acceptance.reasons.push(
+        ...mixedCombatAcceptance.reasons.map(
+          (reason) => `mixed-combat fixture: ${reason}`
+        )
+      );
+    }
     const report = {
       schema: 1,
       generatedAt: new Date().toISOString(),
@@ -1698,9 +1815,13 @@ async function main() {
       boundEffectsAudit,
       losAudit,
       enemyLoopPathReuseAudit,
+      mixedCombatExercise,
+      mixedCombatConsoleAudit,
+      mixedCombatAcceptance,
       pathfindingFallbacks,
       textureUploadAudit,
       sharedTextureAudit,
+      consoleAudit,
       run,
       acceptance,
       profile: summary
@@ -1715,6 +1836,7 @@ async function main() {
       );
     }
   } finally {
+    diagnostics.dispose();
     client.close();
   }
 }
@@ -2084,6 +2206,778 @@ function assessNearbyAdapter(
     exercisedJailKeyNativeCalls: jailKeyNativeCalls,
     reasons
   };
+}
+
+function assessMixedCombatFixture(
+  scenario,
+  setup,
+  exercise,
+  consoleAudit
+) {
+  if (scenario !== "mixed-combat") return null;
+
+  const reasons = [];
+  const calls = exercise?.calls ?? {};
+  const expectedCalls = [
+    "KinkyDungeonCheckProjectileClearance",
+    "KinkyDungeonCastSpell",
+    "KinkyDungeonLaunchBullet",
+    "KinkyDungeonUpdateBullets",
+    "KinkyDungeonSendMagicEvent",
+    "KinkyDungeonSendBulletEvent",
+    "KinkyDungeonSendBuffEvent",
+    "KinkyDungeonApplyBuffToEntity",
+    "KinkyDungeonTickBuffs"
+  ];
+  const exercisedCalls = Object.fromEntries(
+    expectedCalls.map((name) => [name, Number(calls[name] ?? 0)])
+  );
+
+  if (setup?.kind !== "mixed-combat") {
+    reasons.push("setup did not report the mixed-combat fixture");
+  }
+  if (Number(setup?.actualEnemies ?? 0) <= 0) {
+    reasons.push("setup created no enemies");
+  }
+  if (Object.keys(setup?.definitions ?? {}).length < 6) {
+    reasons.push("setup exercised fewer than six enemy definitions");
+  }
+  if (Number(setup?.spellEnemies ?? 0) <= 0) {
+    reasons.push("setup created no spell-capable enemies");
+  }
+  if (Number(setup?.projectileAttackEnemies ?? 0) <= 0) {
+    reasons.push("setup created no projectile-attack enemies");
+  }
+  if (Number(setup?.projectileTargetingEnemies ?? 0) <= 0) {
+    reasons.push("setup created no projectile-targeting enemies");
+  }
+  if (
+    Number(setup?.enemiesWithHostileNeighbor ?? 0) !==
+      Number(setup?.actualEnemies ?? 0) ||
+    Number(setup?.minimumHostileNeighbors ?? 0) <= 0
+  ) {
+    reasons.push("not every enemy has a hostile adjacent target");
+  }
+  if (exercise === null || exercise === undefined) {
+    reasons.push("mixed-combat exercise did not run");
+  } else {
+    if (exercise.restoreExact !== true) {
+      reasons.push("fixture state was not restored exactly after exercise");
+    }
+    if (Number(exercise.randomCalls ?? 0) <= 0) {
+      reasons.push("exercise recorded no RNG calls");
+    }
+    if (Number(exercise.eventTraceCount ?? 0) <= 0) {
+      reasons.push("exercise recorded no event dispatches");
+    }
+    if (
+      !Array.isArray(exercise.run?.actionTrace) ||
+      exercise.run.actionTrace.length !== Number(exercise.turns ?? 0) ||
+      exercise.run.actionTrace.some(
+        (action) =>
+          action?.result !== "Cast" ||
+          action?.bulletFired !== true ||
+          Number(action?.afterBullets ?? 0) <=
+            Number(action?.beforeBullets ?? 0)
+      )
+    ) {
+      reasons.push(
+        "scripted ranged actions did not launch one owned bolt per turn"
+      );
+    }
+    for (const [name, count] of Object.entries(exercisedCalls)) {
+      if (count <= 0) reasons.push(`${name} was not exercised`);
+    }
+    const nonFixtureBuffApplications = Object.entries(
+      exercise.buffApplications ?? {}
+    ).filter(
+      ([signature, count]) =>
+        Number(count) > 0 && !String(signature).includes(":Toy:Plug:")
+    );
+    if (nonFixtureBuffApplications.length === 0) {
+      reasons.push("exercise applied no non-fixture combat or status buff");
+    }
+  }
+  if (Number(consoleAudit?.counts?.errors ?? 0) !== 0) {
+    reasons.push(
+      `console audit recorded ${Number(consoleAudit?.counts?.errors ?? 0)} errors`
+    );
+  }
+  if (Number(consoleAudit?.counts?.warnings ?? 0) !== 0) {
+    reasons.push(
+      `console audit recorded ${Number(
+        consoleAudit?.counts?.warnings ?? 0
+      )} warnings`
+    );
+  }
+
+  return {
+    passed: reasons.length === 0,
+    reasons,
+    setup: {
+      actualEnemies: Number(setup?.actualEnemies ?? 0),
+      definitionCount: Object.keys(setup?.definitions ?? {}).length,
+      spellEnemies: Number(setup?.spellEnemies ?? 0),
+      projectileAttackEnemies: Number(setup?.projectileAttackEnemies ?? 0),
+      projectileTargetingEnemies: Number(
+        setup?.projectileTargetingEnemies ?? 0
+      ),
+      enemiesWithHostileNeighbor: Number(
+        setup?.enemiesWithHostileNeighbor ?? 0
+      )
+    },
+    exercisedCalls,
+    randomCalls: Number(exercise?.randomCalls ?? 0),
+    eventTraceCount: Number(exercise?.eventTraceCount ?? 0),
+    scriptedRangedActions: exercise?.run?.actionTrace?.length ?? 0,
+    restoreExact: exercise?.restoreExact === true,
+    consoleErrors: Number(consoleAudit?.counts?.errors ?? 0),
+    consoleWarnings: Number(consoleAudit?.counts?.warnings ?? 0)
+  };
+}
+
+async function diagnoseMixedCombatDivergence(client, turns) {
+  const systems = ["pathfinding", "ai", "movement", "events"];
+  const sourceGroups = {
+    nearest: ["disableNearestPlayer"],
+    helpless: ["disableHelplessFastNegative"],
+    eligibleRestraints: [
+      "disableEligibleRestraintEnemyKeys",
+      "disableEligibleRestraintCatalogProof",
+      "disableEligibleRestraintRetryReuse",
+      "disableEligibleRestraintTopLevelReuse",
+      "disableEligibleRestraintMultiEntryReuse"
+    ],
+    pathfinding: [
+      "disablePathfindingTopCacheSingleRead",
+      "disablePathfindingContinuationCacheLookup",
+      "disablePathfindingDeferredTileMetadata",
+      "disablePathfindingDirectSuccessors",
+      "disablePathfindingOpenValues",
+      "disablePathfindingHoistedCacheIndex",
+      "disablePathfindingNumericCoordinateKeys",
+      "disablePathfindingTileMembershipTable",
+      "disablePathfindingNumericContinuationIndex",
+      "disablePathfindingClosedFirstSuccessors",
+      "disablePathCacheSingleSlice",
+      "disablePathCacheHoistedKeySuffix",
+      "disablePathCacheEdgeIdentitySkip",
+      "disablePathCacheKnownTailSkip"
+    ],
+    buffEvents: ["disableBuffEventIndex"]
+  };
+  const allSourceKeys = Object.values(sourceGroups).flat();
+  const sourceStatsNames = [
+    "nearestPlayerStats",
+    "helplessFastNegativeStats",
+    "eligibleRestraintEnemyKeyStats",
+    "buffEventIndexStats",
+    "pathfindingTopCacheSingleReadStats",
+    "pathfindingContinuationCacheLookupStats",
+    "pathfindingDeferredTileMetadataStats",
+    "pathfindingDirectSuccessorStats",
+    "pathfindingOpenValuesStats",
+    "pathfindingHoistedCacheIndexStats",
+    "pathfindingNumericCoordinateKeyStats",
+    "pathfindingTileMembershipTableStats",
+    "pathfindingNumericContinuationIndexStats",
+    "pathfindingClosedFirstSuccessorStats",
+    "pathCacheSingleSliceStats",
+    "pathCacheHoistedKeySuffixStats",
+    "pathCacheEdgeIdentitySkipStats",
+    "pathCacheKnownTailStats"
+  ];
+  const modes = [
+    {
+      name: "official-raw-a",
+      systems: [],
+      sourceKeys: [],
+      instrument: false
+    },
+    {
+      name: "official-raw-b",
+      systems: [],
+      sourceKeys: [],
+      instrument: false
+    },
+    {
+      name: "accepted-raw-a",
+      systems,
+      sourceKeys: allSourceKeys,
+      instrument: false
+    },
+    {
+      name: "accepted-raw-b",
+      systems,
+      sourceKeys: allSourceKeys,
+      instrument: false
+    },
+    {
+      name: "accepted-raw-c",
+      systems,
+      sourceKeys: allSourceKeys,
+      instrument: false
+    },
+    { name: "official-a", systems: [], sourceKeys: [] },
+    { name: "official-b", systems: [], sourceKeys: [] },
+    {
+      name: "source-all",
+      systems: [],
+      sourceKeys: allSourceKeys
+    },
+    ...systems.map((system) => ({
+      name: `runtime-${system}`,
+      systems: [system],
+      sourceKeys: []
+    })),
+    ...Object.entries(sourceGroups).map(([name, sourceKeys]) => ({
+      name: `source-${name}`,
+      systems: [],
+      sourceKeys
+    })),
+    ...systems.map((system) => ({
+      name: `accepted-source-plus-runtime-${system}`,
+      systems: [system],
+      sourceKeys: allSourceKeys
+    })),
+    {
+      name: "accepted-all-a",
+      systems,
+      sourceKeys: allSourceKeys
+    },
+    {
+      name: "accepted-all-b",
+      systems,
+      sourceKeys: allSourceKeys
+    },
+    {
+      name: "accepted-all-c",
+      systems,
+      sourceKeys: allSourceKeys
+    }
+  ];
+
+  await client.evaluate(`(${saveCrowdedFixture.toString()})()`, 120_000);
+
+  const runMode = async (mode) =>
+    client.evaluate(
+      `(() => {
+        const restore = ${restoreCrowdedFixture.toString()};
+        const run = ${runCrowdedTurns.toString()};
+        const systems = ${JSON.stringify(systems)};
+        const enabledSystems = new Set(${JSON.stringify(mode.systems)});
+        const allSourceKeys = ${JSON.stringify(allSourceKeys)};
+        const enabledSourceKeys = new Set(${JSON.stringify(mode.sourceKeys)});
+        const sourceStatsNames = ${JSON.stringify(sourceStatsNames)};
+        const instrument = ${mode.instrument !== false};
+        const controlName = "KDHybridSourcePatchControl";
+        const hadControl = Object.prototype.hasOwnProperty.call(
+          globalThis,
+          controlName
+        );
+        const previousControl = globalThis[controlName];
+        const control =
+          previousControl !== null && typeof previousControl === "object"
+            ? previousControl
+            : {};
+        const previousSourceValues = Object.fromEntries(
+          allSourceKeys.map((key) => [
+            key,
+            {
+              had: Object.prototype.hasOwnProperty.call(control, key),
+              value: control[key]
+            }
+          ])
+        );
+        const previousSourceStats = Object.fromEntries(
+          sourceStatsNames.map((key) => [
+            key,
+            {
+              had: Object.prototype.hasOwnProperty.call(control, key),
+              value: control[key]
+            }
+          ])
+        );
+        globalThis[controlName] = control;
+        for (const key of allSourceKeys) {
+          control[key] = !enabledSourceKeys.has(key);
+        }
+        const sourceStats = {};
+        if (instrument) {
+          for (const key of sourceStatsNames) {
+            sourceStats[key] = {};
+            control[key] = sourceStats[key];
+          }
+        }
+
+        const initial = restore();
+        for (const system of systems) {
+          const entered = enabledSystems.has(system)
+            ? KDHybrid.enableSystem(system)
+            : KDHybrid.disableSystem(
+                system,
+                "mixed-divergence-official-control"
+              );
+          if (!entered) {
+            throw new Error(
+              "Could not configure mixed-divergence system " + system
+            );
+          }
+        }
+        const statusSnapshot = () =>
+          Object.fromEntries(
+            KDHybrid.status().systems.map((status) => [
+              status.globalName,
+              { ...status }
+            ])
+          );
+        const beforeStatus = statusSnapshot();
+
+        const randomTrace = [];
+        const eventTrace = [];
+        const unsafeMoves = [];
+        const originalRandom = KDRandom;
+        const observerName = "__KDHybridEnemyUpdateCacheObserver";
+        const hadObserver = Object.prototype.hasOwnProperty.call(
+          globalThis,
+          observerName
+        );
+        const previousObserver = globalThis[observerName];
+        let latestEnemyMove = null;
+        const randomWrapper = function KDHybridDivergenceRandomAudit() {
+          const value = originalRandom();
+          randomTrace.push({
+            tick: KinkyDungeonCurrentTick,
+            value: value.toPrecision(17)
+          });
+          return value;
+        };
+        const originalEventAudit = globalThis.KinkyDungeonSendMagicEvent;
+        if (typeof originalEventAudit !== "function") {
+          throw new Error(
+            "KinkyDungeonSendMagicEvent is unavailable for divergence audit"
+          );
+        }
+        const eventWrapper = function KDHybridDivergenceEventAudit(
+          eventName,
+          data,
+          ...args
+        ) {
+          const event = String(eventName ?? "");
+          const entry = {
+            tick: KinkyDungeonCurrentTick,
+            event,
+            enemyId: data?.enemy?.id ?? null,
+            targetId: data?.target?.id ?? null,
+            attackerId: data?.attacker?.id ?? null,
+            bulletSource:
+              data?.bullet?.bullet?.source ??
+              data?.bullet?.source ??
+              null
+          };
+          eventTrace.push(entry);
+          if (event === "enemyMove") {
+            const enemy = data?.enemy;
+            latestEnemyMove = {
+              tick: KinkyDungeonCurrentTick,
+              enemyId: enemy?.id ?? null,
+              enemyName: enemy?.Enemy?.name ?? null,
+              from: {
+                x: data?.lastX ?? enemy?.lastx ?? null,
+                y: data?.lastY ?? enemy?.lasty ?? null
+              },
+              to: {
+                x: data?.moveX ?? enemy?.x ?? null,
+                y: data?.moveY ?? enemy?.y ?? null
+              },
+              bulletCount: KDMapData.Bullets?.length ?? 0,
+              effectTiles: Object.keys(
+                KDMapData.EffectTiles?.[
+                  String(data?.moveX) + "," + String(data?.moveY)
+                ] ?? {}
+              ).sort()
+            };
+          }
+          return Reflect.apply(
+            originalEventAudit,
+            this,
+            [eventName, data, ...args]
+          );
+        };
+        globalThis[observerName] = (event, detail) => {
+          if (event === "unsafe-move") {
+            unsafeMoves.push({
+              sequence: unsafeMoves.length,
+              ...(latestEnemyMove ?? {}),
+              detail: detail ?? null
+            });
+          }
+          if (typeof previousObserver === "function") {
+            Reflect.apply(previousObserver, undefined, [event, detail]);
+          }
+        };
+        if (instrument) {
+          globalThis.KinkyDungeonSendMagicEvent = eventWrapper;
+          KDRandom = randomWrapper;
+        }
+
+        const turnSnapshots = [];
+        try {
+          for (let turn = 0; turn < ${turns}; turn += 1) {
+            const randomStart = randomTrace.length;
+            const eventStart = eventTrace.length;
+            const result = run(1, true);
+            turnSnapshots.push({
+              turn: turn + 1,
+              stateSignature: result.stateSignature,
+              state: result.state,
+              randomStart,
+              randomEnd: randomTrace.length,
+              eventStart,
+              eventEnd: eventTrace.length
+            });
+          }
+          const afterStatus = statusSnapshot();
+          return {
+            name: ${JSON.stringify(mode.name)},
+            instrumented: instrument,
+            initialStateSignature: initial.stateSignature,
+            systems: [...enabledSystems],
+            sourceKeys: [...enabledSourceKeys],
+            modes: Object.fromEntries(
+              systems.map((system) => [
+                system,
+                KDHybrid.systemStatus(system)?.mode ?? null
+              ])
+            ),
+            turnSnapshots,
+            randomTrace,
+            eventTrace,
+            unsafeMoves,
+            adapterDeltas: Object.fromEntries(
+              Object.keys(afterStatus).map((name) => [
+                name,
+                {
+                  mode: afterStatus[name]?.mode ?? null,
+                  calls:
+                    Number(afterStatus[name]?.calls ?? 0) -
+                    Number(beforeStatus[name]?.calls ?? 0),
+                  nativeCalls:
+                    Number(afterStatus[name]?.nativeCalls ?? 0) -
+                    Number(beforeStatus[name]?.nativeCalls ?? 0),
+                  fallbackCalls:
+                    Number(afterStatus[name]?.fallbackCalls ?? 0) -
+                    Number(beforeStatus[name]?.fallbackCalls ?? 0),
+                  failures:
+                    Number(afterStatus[name]?.failures ?? 0) -
+                    Number(beforeStatus[name]?.failures ?? 0)
+                }
+              ])
+            ),
+            sourceStats
+          };
+        } finally {
+          if (instrument && KDRandom === randomWrapper) {
+            KDRandom = originalRandom;
+          }
+          if (globalThis.KinkyDungeonSendMagicEvent === eventWrapper) {
+            globalThis.KinkyDungeonSendMagicEvent = originalEventAudit;
+          }
+          if (hadObserver) {
+            globalThis[observerName] = previousObserver;
+          } else {
+            delete globalThis[observerName];
+          }
+          for (const key of allSourceKeys) {
+            const previous = previousSourceValues[key];
+            if (previous.had) control[key] = previous.value;
+            else delete control[key];
+          }
+          for (const key of sourceStatsNames) {
+            const previous = previousSourceStats[key];
+            if (previous.had) control[key] = previous.value;
+            else delete control[key];
+          }
+          if (hadControl) globalThis[controlName] = previousControl;
+          else delete globalThis[controlName];
+        }
+      })()`,
+      120_000
+    );
+
+  const rawRuns = [];
+  try {
+    for (const mode of modes) rawRuns.push(await runMode(mode));
+  } finally {
+    await client.evaluate(
+      `(() => {
+        for (const system of ${JSON.stringify(systems)}) {
+          KDHybrid.enableSystem(system);
+        }
+      })()`,
+      30_000
+    );
+  }
+
+  const officialRaw = rawRuns.find((run) => run.name === "official-raw-a");
+  const officialInstrumented = rawRuns.find(
+    (run) => run.name === "official-a"
+  );
+  if (!officialRaw || !officialInstrumented) {
+    throw new Error("Mixed divergence official controls are missing");
+  }
+  const comparisons = Object.fromEntries(
+    rawRuns
+      .filter(
+        (run) => run !== officialRaw && run !== officialInstrumented
+      )
+      .map((run) => {
+        const reference = run.instrumented
+          ? officialInstrumented
+          : officialRaw;
+        return [run.name, compareDiagnosticRuns(reference, run)];
+      })
+  );
+  return {
+    turns,
+    officialControl: "all runtime systems and turn source fast paths disabled",
+    sourceGroups,
+    comparisons,
+    runs: rawRuns.map(summarizeDiagnosticRun)
+  };
+}
+
+function compareDiagnosticRuns(expected, actual) {
+  const turnCount = Math.min(
+    expected.turnSnapshots.length,
+    actual.turnSnapshots.length
+  );
+  let firstStateDifference = null;
+  let firstRawStateDifference = null;
+  for (let index = 0; index < turnCount; index += 1) {
+    const expectedTurn = expected.turnSnapshots[index];
+    const actualTurn = actual.turnSnapshots[index];
+    const rawDifference = firstJsonDifference(
+      expectedTurn.state,
+      actualTurn.state
+    );
+    if (rawDifference && firstRawStateDifference === null) {
+      firstRawStateDifference = {
+        turn: index + 1,
+        expectedStateSignature: expectedTurn.stateSignature,
+        actualStateSignature: actualTurn.stateSignature,
+        difference: rawDifference
+      };
+    }
+    const normalizedExpected = normalizeDiagnosticState(expectedTurn.state);
+    const normalizedActual = normalizeDiagnosticState(actualTurn.state);
+    const normalizedDifference = firstJsonDifference(
+      normalizedExpected,
+      normalizedActual
+    );
+    if (normalizedDifference) {
+      firstStateDifference = {
+        turn: index + 1,
+        expectedStateSignature: expectedTurn.stateSignature,
+        actualStateSignature: actualTurn.stateSignature,
+        difference: normalizedDifference
+      };
+      const enemyMatch =
+        firstStateDifference.difference?.path.match(
+          /^\$\.enemies\[(\d+)\]/
+        );
+      if (enemyMatch) {
+        const enemyIndex = Number(enemyMatch[1]);
+        firstStateDifference.enemy = {
+          index: enemyIndex,
+          expected: expectedTurn.state?.enemies?.[enemyIndex],
+          actual: actualTurn.state?.enemies?.[enemyIndex]
+        };
+      }
+      break;
+    }
+  }
+  return {
+    statesMatch:
+      expected.turnSnapshots.length === actual.turnSnapshots.length &&
+      firstStateDifference === null,
+    firstStateDifference,
+    firstRawStateDifference,
+    random: firstTraceDifference(expected.randomTrace, actual.randomTrace),
+    events: firstTraceDifference(expected.eventTrace, actual.eventTrace),
+    unsafeMoveCount: actual.unsafeMoves.length
+  };
+}
+
+function normalizeDiagnosticState(state) {
+  const normalized = structuredClone(state);
+  const stripVolatile = (value) => {
+    if (Array.isArray(value)) {
+      for (const entry of value) stripVolatile(entry);
+      return;
+    }
+    if (value === null || typeof value !== "object") return;
+    delete value.spriteID;
+    for (const entry of Object.values(value)) stripVolatile(entry);
+  };
+  stripVolatile(normalized);
+  return normalized;
+}
+
+function firstTraceDifference(expected, actual) {
+  const count = Math.min(expected.length, actual.length);
+  for (let index = 0; index < count; index += 1) {
+    const expectedJson = JSON.stringify(expected[index]);
+    const actualJson = JSON.stringify(actual[index]);
+    if (expectedJson !== actualJson) {
+      return {
+        matches: false,
+        index,
+        expected: expected[index],
+        actual: actual[index],
+        expectedCount: expected.length,
+        actualCount: actual.length
+      };
+    }
+  }
+  return {
+    matches: expected.length === actual.length,
+    index: expected.length === actual.length ? null : count,
+    expected: expected[count],
+    actual: actual[count],
+    expectedCount: expected.length,
+    actualCount: actual.length
+  };
+}
+
+function firstJsonDifference(expected, actual, pathName = "$", depth = 0) {
+  if (Object.is(expected, actual)) return null;
+  if (depth > 20) {
+    return {
+      path: pathName,
+      expected: compactDiagnosticValue(expected),
+      actual: compactDiagnosticValue(actual),
+      reason: "depth-limit"
+    };
+  }
+  if (
+    expected === null ||
+    actual === null ||
+    typeof expected !== "object" ||
+    typeof actual !== "object"
+  ) {
+    return {
+      path: pathName,
+      expected: compactDiagnosticValue(expected),
+      actual: compactDiagnosticValue(actual),
+      reason: "value"
+    };
+  }
+  if (Array.isArray(expected) !== Array.isArray(actual)) {
+    return {
+      path: pathName,
+      expected: compactDiagnosticValue(expected),
+      actual: compactDiagnosticValue(actual),
+      reason: "type"
+    };
+  }
+  if (Array.isArray(expected)) {
+    const count = Math.min(expected.length, actual.length);
+    for (let index = 0; index < count; index += 1) {
+      const difference = firstJsonDifference(
+        expected[index],
+        actual[index],
+        `${pathName}[${index}]`,
+        depth + 1
+      );
+      if (difference) return difference;
+    }
+    if (expected.length !== actual.length) {
+      return {
+        path: `${pathName}.length`,
+        expected: expected.length,
+        actual: actual.length,
+        reason: "length"
+      };
+    }
+    return null;
+  }
+  const keys = [...new Set([...Object.keys(expected), ...Object.keys(actual)])]
+    .sort();
+  for (const key of keys) {
+    if (!Object.prototype.hasOwnProperty.call(expected, key)) {
+      return {
+        path: `${pathName}.${key}`,
+        expected: undefined,
+        actual: compactDiagnosticValue(actual[key]),
+        reason: "missing-expected"
+      };
+    }
+    if (!Object.prototype.hasOwnProperty.call(actual, key)) {
+      return {
+        path: `${pathName}.${key}`,
+        expected: compactDiagnosticValue(expected[key]),
+        actual: undefined,
+        reason: "missing-actual"
+      };
+    }
+    const difference = firstJsonDifference(
+      expected[key],
+      actual[key],
+      `${pathName}.${key}`,
+      depth + 1
+    );
+    if (difference) return difference;
+  }
+  return null;
+}
+
+function compactDiagnosticValue(value) {
+  const serialized = JSON.stringify(value);
+  if (serialized === undefined) return String(value);
+  return serialized.length <= 500
+    ? value
+    : `${serialized.slice(0, 497)}...`;
+}
+
+function summarizeDiagnosticRun(run) {
+  return {
+    name: run.name,
+    instrumented: run.instrumented,
+    initialStateSignature: run.initialStateSignature,
+    systems: run.systems,
+    sourceKeys: run.sourceKeys,
+    modes: run.modes,
+    turns: run.turnSnapshots.map((turn) => ({
+      turn: turn.turn,
+      stateSignature: turn.stateSignature,
+      randomCalls: turn.randomEnd - turn.randomStart,
+      randomHash: hashDiagnosticTrace(
+        run.randomTrace.slice(turn.randomStart, turn.randomEnd)
+      ),
+      eventCalls: turn.eventEnd - turn.eventStart,
+      eventHash: hashDiagnosticTrace(
+        run.eventTrace.slice(turn.eventStart, turn.eventEnd)
+      )
+    })),
+    randomCalls: run.randomTrace.length,
+    randomHash: hashDiagnosticTrace(run.randomTrace),
+    eventCalls: run.eventTrace.length,
+    eventHash: hashDiagnosticTrace(run.eventTrace),
+    unsafeMoves: run.unsafeMoves,
+    adapterDeltas: run.adapterDeltas,
+    sourceStats: run.sourceStats
+  };
+}
+
+function hashDiagnosticTrace(trace) {
+  const text = JSON.stringify(trace);
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
 async function benchmarkNearbyAdapter(
@@ -18681,7 +19575,11 @@ function saveCrowdedFixture() {
       action: enemy.action,
       attackPoints: enemy.attackPoints,
       movePoints: enemy.movePoints,
+      castCooldown: enemy.castCooldown,
+      castCooldownSpecial: enemy.castCooldownSpecial,
       specialCD: enemy.specialCD,
+      usingSpecial: enemy.usingSpecial,
+      spellRdy: enemy.spellRdy,
       boundLevel: enemy.boundLevel,
       distraction: enemy.distraction,
       stun: enemy.stun,
@@ -18751,7 +19649,11 @@ function restoreCrowdedFixture() {
         enemy.action = saved.action;
         enemy.attackPoints = saved.attackPoints;
         enemy.movePoints = saved.movePoints;
+        enemy.castCooldown = saved.castCooldown;
+        enemy.castCooldownSpecial = saved.castCooldownSpecial;
         enemy.specialCD = saved.specialCD;
+        enemy.usingSpecial = saved.usingSpecial;
+        enemy.spellRdy = saved.spellRdy;
         enemy.boundLevel = saved.boundLevel;
         enemy.distraction = saved.distraction;
         enemy.stun = saved.stun;
@@ -18817,6 +19719,7 @@ function restoreCrowdedFixture() {
         .map((enemy) => ({
           i: enemy.kdHybridTurnProfileIndex,
           id: enemy.id,
+          name: enemy.Enemy?.name,
           x: enemy.x,
           y: enemy.y,
           gx: enemy.gx,
@@ -18834,7 +19737,11 @@ function restoreCrowdedFixture() {
           action: enemy.action,
           attackPoints: enemy.attackPoints,
           movePoints: enemy.movePoints,
+          castCooldown: enemy.castCooldown,
+          castCooldownSpecial: enemy.castCooldownSpecial,
           specialCD: enemy.specialCD,
+          usingSpecial: enemy.usingSpecial,
+          spellRdy: enemy.spellRdy,
           boundLevel: enemy.boundLevel,
           distraction: enemy.distraction,
           stun: enemy.stun,
@@ -18855,7 +19762,12 @@ function restoreCrowdedFixture() {
         name: item.name,
         x: item.x,
         y: item.y
-      }))
+      })),
+      playerBuffs: KinkyDungeonPlayerBuffs,
+      bullets: KDMapData.Bullets,
+      effectTiles: Object.entries(KDMapData.EffectTiles ?? {}).sort(
+        ([left], [right]) => left.localeCompare(right)
+      )
     });
     let hash = 0x811c9dc5;
     for (let index = 0; index < stateJson.length; index += 1) {
@@ -19529,6 +20441,18 @@ function verifyFindMasterPotentialParity() {
         failures:
           Number(after?.failures ?? 0) - Number(before?.failures ?? 0)
       };
+      const predicates = {
+        expectedSelectsInjectedCandidate: expected?.master === candidate,
+        masterIdentity: actual?.master === expected?.master,
+        distanceIdentity: Object.is(actual?.dist, expected?.dist),
+        infoIdentity: actual?.info === expected?.info,
+        infoStructural: structuralEqual(actual?.info, expected?.info),
+        oneNativeCall:
+          delta.calls === 1 &&
+          delta.nativeCalls === 1 &&
+          delta.fallbackCalls === 0 &&
+          delta.failures === 0
+      };
       scenarios[kind] = {
         subjectId: subject.id,
         candidateId: candidate.id,
@@ -19536,16 +20460,11 @@ function verifyFindMasterPotentialParity() {
         actualMasterId: actual?.master?.id ?? null,
         expectedDistance: expected?.dist,
         actualDistance: actual?.dist,
+        expectedInfo: cloneData(expected?.info),
+        actualInfo: cloneData(actual?.info),
         delta,
-        exact:
-          expected?.master === candidate &&
-          actual?.master === expected?.master &&
-          Object.is(actual?.dist, expected?.dist) &&
-          actual?.info === expected?.info &&
-          delta.calls === 1 &&
-          delta.nativeCalls === 1 &&
-          delta.fallbackCalls === 0 &&
-          delta.failures === 0
+        predicates,
+        exact: Object.values(predicates).every(Boolean)
       };
     }
   } finally {
@@ -19590,6 +20509,37 @@ function verifyFindMasterPotentialParity() {
       }
     }
     return null;
+  }
+
+  function cloneData(value) {
+    if (value === undefined) return { type: "undefined" };
+    try {
+      return structuredClone(value);
+    } catch {
+      return { type: typeof value, text: String(value) };
+    }
+  }
+
+  function structuralEqual(left, right) {
+    if (Object.is(left, right)) return true;
+    if (
+      left === null ||
+      right === null ||
+      typeof left !== "object" ||
+      typeof right !== "object"
+    ) {
+      return false;
+    }
+    if (Array.isArray(left) !== Array.isArray(right)) return false;
+    const leftKeys = Object.keys(left).sort();
+    const rightKeys = Object.keys(right).sort();
+    if (
+      leftKeys.length !== rightKeys.length ||
+      leftKeys.some((key, index) => key !== rightKeys[index])
+    ) {
+      return false;
+    }
+    return leftKeys.every((key) => structuralEqual(left[key], right[key]));
   }
 }
 
@@ -23707,6 +24657,131 @@ function measureEventFamilyDispatch(turns) {
   };
 }
 
+function measureMixedCombatExercise(turns, runTurns) {
+  "use strict";
+  if (!Number.isInteger(turns) || turns < 1) turns = 1;
+  if (typeof runTurns !== "function") {
+    throw new Error("Mixed combat exercise requires the turn runner");
+  }
+
+  const names = [
+    "KinkyDungeonCheckProjectileClearance",
+    "KinkyDungeonCastSpell",
+    "KinkyDungeonLaunchBullet",
+    "KinkyDungeonUpdateBullets",
+    "KinkyDungeonUpdateBulletsCollisions",
+    "KinkyDungeonApplyBuffToEntity",
+    "KinkyDungeonTickBuffs",
+    "KinkyDungeonSendEvent",
+    "KinkyDungeonSendMagicEvent",
+    "KinkyDungeonSendBulletEvent",
+    "KinkyDungeonSendBuffEvent"
+  ];
+  const eventNames = new Set([
+    "KinkyDungeonSendEvent",
+    "KinkyDungeonSendMagicEvent",
+    "KinkyDungeonSendBulletEvent",
+    "KinkyDungeonSendBuffEvent"
+  ]);
+  const originals = new Map();
+  const wrappers = new Map();
+  const calls = {};
+  const events = {};
+  const buffApplications = {};
+  let eventTraceCount = 0;
+  let eventTraceHash = 0x811c9dc5;
+  let randomCalls = 0;
+  let randomHash = 0x811c9dc5;
+  const firstRandomValues = [];
+  const originalRandom = KDRandom;
+
+  const hashText = (hash, text) => {
+    for (let index = 0; index < text.length; index += 1) {
+      hash ^= text.charCodeAt(index);
+      hash = Math.imul(hash, 0x01000193);
+    }
+    return hash >>> 0;
+  };
+
+  for (const name of names) {
+    const original = globalThis[name];
+    if (typeof original !== "function") continue;
+    originals.set(name, original);
+    calls[name] = 0;
+    const wrapper = function (...args) {
+      calls[name] += 1;
+      if (eventNames.has(name)) {
+        const event = String(args[0] ?? "");
+        events[`${name}:${event}`] =
+          Number(events[`${name}:${event}`] ?? 0) + 1;
+        eventTraceCount += 1;
+        eventTraceHash = hashText(eventTraceHash, `${name}:${event}\n`);
+      } else if (name === "KinkyDungeonApplyBuffToEntity") {
+        const target = args[0];
+        const buff = args[1];
+        const signature = [
+          target?.player ? "player" : "enemy",
+          String(buff?.id ?? ""),
+          String(buff?.type ?? "")
+        ].join(":");
+        buffApplications[signature] =
+          Number(buffApplications[signature] ?? 0) + 1;
+      }
+      return Reflect.apply(original, this, args);
+    };
+    wrappers.set(name, wrapper);
+    globalThis[name] = wrapper;
+  }
+
+  const randomWrapper = function KDHybridMixedCombatRandomAudit() {
+    const value = originalRandom();
+    randomCalls += 1;
+    if (firstRandomValues.length < 32) firstRandomValues.push(value);
+    randomHash = hashText(randomHash, `${value.toPrecision(17)}\n`);
+    return value;
+  };
+  KDRandom = randomWrapper;
+
+  try {
+    const run = runTurns(turns, true);
+    const activeBuffs = {};
+    for (const enemy of KDMapData.Entities.filter(
+      (candidate) => candidate.kdHybridTurnProfile
+    )) {
+      for (const buff of Object.values(enemy.buffs ?? {})) {
+        const signature = [
+          String(enemy.Enemy?.name ?? ""),
+          String(buff?.id ?? ""),
+          String(buff?.type ?? "")
+        ].join(":");
+        activeBuffs[signature] = Number(activeBuffs[signature] ?? 0) + 1;
+      }
+    }
+    return {
+      turns,
+      calls,
+      events,
+      buffApplications,
+      activeBuffs,
+      eventTraceCount,
+      eventTraceHash: eventTraceHash.toString(16).padStart(8, "0"),
+      randomCalls,
+      randomHash: randomHash.toString(16).padStart(8, "0"),
+      firstRandomValues,
+      finalBulletCount: KDMapData.Bullets?.length ?? 0,
+      finalEffectTileCount: Object.keys(KDMapData.EffectTiles ?? {}).length,
+      run
+    };
+  } finally {
+    if (KDRandom === randomWrapper) KDRandom = originalRandom;
+    for (const [name, original] of originals) {
+      if (globalThis[name] === wrappers.get(name)) {
+        globalThis[name] = original;
+      }
+    }
+  }
+}
+
 function measureHotFunctionCalls(turns) {
   "use strict";
   if (!Number.isInteger(turns) || turns < 1) turns = 1;
@@ -23736,6 +24811,13 @@ function measureHotFunctionCalls(turns) {
     "KinkyDungeonMultiplicativeStat",
     "KinkyDungeonGetWarningTiles",
     "KinkyDungeonCheckProjectileClearance",
+    "KinkyDungeonCastSpell",
+    "KinkyDungeonLaunchBullet",
+    "KinkyDungeonUpdateBullets",
+    "KinkyDungeonUpdateBulletsCollisions",
+    "KinkyDungeonSendMagicEvent",
+    "KinkyDungeonSendBulletEvent",
+    "KinkyDungeonSendBuffEvent",
     "KDEnemyAddSound",
     "KinkyDungeonPlaySound",
     "KDAddThought",
@@ -24668,10 +25750,105 @@ function median(values) {
   return sorted[Math.floor(sorted.length / 2)];
 }
 
+function installCdpDiagnostics(client) {
+  const counts = {
+    console: {},
+    log: {},
+    exceptions: 0
+  };
+  const entries = [];
+  const importantEntries = [];
+  const push = (entry, important = false) => {
+    if (entries.length < 200) entries.push(entry);
+    if (important && importantEntries.length < 50) {
+      importantEntries.push(entry);
+    }
+  };
+  const consoleOff = client.on("Runtime.consoleAPICalled", (params) => {
+    const type = String(params?.type ?? "unknown");
+    counts.console[type] = Number(counts.console[type] ?? 0) + 1;
+    push({
+      source: "console",
+      level: type,
+      text: (params?.args ?? [])
+        .map((argument) => {
+          if (argument?.value !== undefined) return String(argument.value);
+          return String(argument?.description ?? argument?.type ?? "");
+        })
+        .join(" ")
+        .slice(0, 1_000)
+    }, ["warning", "warn", "error", "assert"].includes(type));
+  });
+  const exceptionOff = client.on("Runtime.exceptionThrown", (params) => {
+    counts.exceptions += 1;
+    const details = params?.exceptionDetails;
+    push({
+      source: "exception",
+      level: "error",
+      text: String(
+        details?.exception?.description ?? details?.text ?? "unknown exception"
+      ).slice(0, 1_000),
+      url: details?.url,
+      lineNumber: details?.lineNumber,
+      columnNumber: details?.columnNumber
+    }, true);
+  });
+  const logOff = client.on("Log.entryAdded", (params) => {
+    const entry = params?.entry;
+    const level = String(entry?.level ?? "unknown");
+    counts.log[level] = Number(counts.log[level] ?? 0) + 1;
+    push({
+      source: "log",
+      level,
+      text: String(entry?.text ?? "").slice(0, 1_000),
+      url: entry?.url,
+      lineNumber: entry?.lineNumber
+    }, ["warning", "error"].includes(level));
+  });
+  return {
+    snapshot() {
+      const warningCount =
+        Number(counts.console.warning ?? 0) +
+        Number(counts.console.warn ?? 0) +
+        Number(counts.log.warning ?? 0);
+      const errorCount =
+        Number(counts.console.error ?? 0) +
+        Number(counts.console.assert ?? 0) +
+        Number(counts.log.error ?? 0) +
+        counts.exceptions;
+      return {
+        counts: {
+          console: { ...counts.console },
+          log: { ...counts.log },
+          exceptions: counts.exceptions,
+          warnings: warningCount,
+          errors: errorCount
+        },
+        entries: entries.map((entry) => ({ ...entry })),
+        importantEntries: importantEntries.map((entry) => ({ ...entry })),
+        truncated: entries.length >= 200
+      };
+    },
+    reset() {
+      for (const key of Object.keys(counts.console)) delete counts.console[key];
+      for (const key of Object.keys(counts.log)) delete counts.log[key];
+      counts.exceptions = 0;
+      entries.length = 0;
+      importantEntries.length = 0;
+    },
+    dispose() {
+      consoleOff();
+      exceptionOff();
+      logOff();
+    }
+  };
+}
+
 class CdpClient {
   #socket;
   #nextId = 1;
   #pending = new Map();
+  #listeners = new Map();
 
   static async connect(url) {
     const socket = new WebSocket(url);
@@ -24707,6 +25884,12 @@ class CdpClient {
         typeof event.data === "string" ? event.data : await event.data.text();
       const message = JSON.parse(text);
       if (message.id === undefined) {
+        const listeners = this.#listeners.get(message.method);
+        if (listeners !== undefined) {
+          for (const listener of [...listeners]) {
+            listener(message.params);
+          }
+        }
         return;
       }
       const pending = this.#pending.get(message.id);
@@ -24736,6 +25919,19 @@ class CdpClient {
       this.#pending.set(id, { method, resolve, reject, timer });
       this.#socket.send(JSON.stringify({ id, method, params }));
     });
+  }
+
+  on(method, listener) {
+    let listeners = this.#listeners.get(method);
+    if (listeners === undefined) {
+      listeners = new Set();
+      this.#listeners.set(method, listeners);
+    }
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+      if (listeners.size === 0) this.#listeners.delete(method);
+    };
   }
 
   async evaluate(expression, timeoutMs) {
@@ -25244,6 +26440,161 @@ function setupCombatTurn(requestedEnemies) {
     }
     return (hash >>> 0).toString(16).padStart(8, "0");
   }
+
+}
+
+function setupMixedCombatTurn(requestedEnemies) {
+  "use strict";
+
+  const definitions = [
+    "MaidforceMafia",
+    "MaidforceMini",
+    "MaidforcePara",
+    "MageZombie",
+    "TalismanZombie",
+    "BookChain",
+    "BookRope",
+    "BookBelt"
+  ];
+  const previous = KDMapData.Entities.filter(
+    (enemy) => enemy.kdHybridTurnProfile
+  )
+    .sort(
+      (left, right) =>
+        left.kdHybridTurnProfileIndex - right.kdHybridTurnProfileIndex
+    )
+    .map((enemy) => ({
+      x: enemy.x,
+      y: enemy.y,
+      index: enemy.kdHybridTurnProfileIndex,
+      faction: enemy.faction
+    }));
+  if (previous.length !== requestedEnemies) {
+    throw new Error(
+      `Mixed combat expected ${requestedEnemies} base enemies; found ${previous.length}`
+    );
+  }
+  const missingDefinitions = definitions.filter(
+    (name) => !KinkyDungeonGetEnemyByName(name)
+  );
+  if (missingDefinitions.length > 0) {
+    throw new Error(
+      `Mixed combat enemy definitions are unavailable: ${missingDefinitions.join(", ")}`
+    );
+  }
+
+  for (const enemy of [...KDMapData.Entities]) {
+    if (enemy.kdHybridTurnProfile) {
+      KDRemoveEntity(enemy);
+    }
+  }
+
+  for (const slot of previous) {
+    const name = definitions[slot.index % definitions.length];
+    const enemy = DialogueCreateEnemy(slot.x, slot.y, name);
+    if (!enemy) {
+      throw new Error(
+        `Failed to create mixed combat ${name} at ${slot.x},${slot.y}`
+      );
+    }
+    KDRunCreationScript(enemy, KDGetCurrentLocation());
+    enemy.kdHybridTurnProfile = true;
+    enemy.kdHybridTurnProfileIndex = slot.index;
+    enemy.faction = slot.faction;
+    enemy.rage = 0;
+    enemy.hostile = 0;
+    enemy.ceasefire = 0;
+    enemy.allied = 0;
+    enemy.aware = true;
+    enemy.vp = 1;
+    enemy.aggro = 1;
+    enemy.hp = Math.max(10_000, Number(enemy.Enemy?.maxhp ?? 1) * 1_000);
+    enemy.attackPoints = 0;
+    enemy.movePoints = 0;
+    enemy.warningTiles = [];
+    enemy.gx = enemy.x;
+    enemy.gy = enemy.y;
+    enemy.castCooldown = 0;
+    enemy.castCooldownSpecial = 0;
+    enemy.specialCD = 0;
+  }
+
+  KinkyDungeonRefreshEnemiesCache();
+  KDHybrid.enableSystem("pathfinding");
+  KDHybrid.enableSystem("ai");
+  KDHybrid.enableSystem("movement");
+  KDHybrid.enableSystem("events");
+  KDHybrid.setPathfindingMode("fast");
+
+  const enemies = KDMapData.Entities.filter(
+    (enemy) => enemy.kdHybridTurnProfile
+  );
+  const definitionCounts = {};
+  const spellNames = new Set();
+  let projectileAttackEnemies = 0;
+  let projectileTargetingEnemies = 0;
+  let spellEnemies = 0;
+  for (const enemy of enemies) {
+    const name = String(enemy.Enemy?.name ?? "");
+    definitionCounts[name] = Number(definitionCounts[name] ?? 0) + 1;
+    if (enemy.Enemy?.projectileAttack) projectileAttackEnemies += 1;
+    if (enemy.Enemy?.projectileTargeting) projectileTargetingEnemies += 1;
+    if (Array.isArray(enemy.Enemy?.spells) && enemy.Enemy.spells.length > 0) {
+      spellEnemies += 1;
+      for (const spell of enemy.Enemy.spells) spellNames.add(String(spell));
+    }
+  }
+  const hostileNeighborCounts = enemies.map(
+    (enemy) =>
+      enemies.filter(
+        (candidate) =>
+          candidate !== enemy &&
+          Math.max(
+            Math.abs(candidate.x - enemy.x),
+            Math.abs(candidate.y - enemy.y)
+          ) <= 1 &&
+          KDHostile(enemy, candidate)
+      ).length
+  );
+  const mapText = `${KDMapData.Grid}\n${enemies
+    .sort(
+      (left, right) =>
+        left.kdHybridTurnProfileIndex - right.kdHybridTurnProfileIndex
+    )
+    .map(
+      (enemy) =>
+        `${enemy.kdHybridTurnProfileIndex}:${enemy.Enemy?.name}:${enemy.x},${enemy.y}:${KDGetFaction(enemy)}`
+    )
+    .join(";")}`;
+  return {
+    kind: "mixed-combat",
+    map: {
+      width: KDMapData.GridWidth,
+      height: KDMapData.GridHeight,
+      roomType: KDMapData.RoomType,
+      mapFaction: KDMapData.MapFaction
+    },
+    mapSignature: hashText(mapText),
+    actualEnemies: enemies.length,
+    definitions: definitionCounts,
+    spellEnemies,
+    projectileAttackEnemies,
+    projectileTargetingEnemies,
+    spellNames: [...spellNames].sort(),
+    enemiesWithHostileNeighbor: hostileNeighborCounts.filter(
+      (count) => count > 0
+    ).length,
+    minimumHostileNeighbors: Math.min(...hostileNeighborCounts)
+  };
+
+  function hashText(text) {
+    let hash = 0x811c9dc5;
+    for (let index = 0; index < text.length; index += 1) {
+      hash ^= text.charCodeAt(index);
+      hash = Math.imul(hash, 0x01000193);
+    }
+    return (hash >>> 0).toString(16).padStart(8, "0");
+  }
 }
 
 function setupPrisonTurn(requestedEnemies) {
@@ -25383,13 +26734,86 @@ function setupPrisonTurn(requestedEnemies) {
   }
 }
 
-function runCrowdedTurns(turns, includeState) {
+function mixedCombatTurnAction(turnIndex) {
+  "use strict";
+
+  const plans = [
+    { enemyName: "MageZombie", spellName: "ZombieOrb" },
+    { enemyName: "BookChain", spellName: "MagicChain" }
+  ];
+  const enemies = KDMapData.Entities.filter(
+    (enemy) => enemy.kdHybridTurnProfile
+  ).sort(
+    (left, right) =>
+      left.kdHybridTurnProfileIndex - right.kdHybridTurnProfileIndex
+  );
+  const plan = plans[turnIndex % plans.length];
+  const source = enemies.find(
+    (enemy) => enemy.Enemy?.name === plan.enemyName
+  );
+  if (!source) {
+    throw new Error(
+      `Mixed-combat action could not find ${plan.enemyName}`
+    );
+  }
+  if (!source.Enemy?.spells?.includes(plan.spellName)) {
+    throw new Error(
+      `${plan.enemyName} does not own mixed-combat spell ${plan.spellName}`
+    );
+  }
+  const target = enemies.find(
+    (enemy) => enemy !== source && KDHostile(source, enemy)
+  );
+  if (!target) {
+    throw new Error(
+      `Mixed-combat action could not find a hostile target for ${plan.enemyName}`
+    );
+  }
+  const spell = KinkyDungeonFindSpell(plan.spellName, true);
+  if (!spell || spell.type !== "bolt") {
+    throw new Error(
+      `Mixed-combat spell ${plan.spellName} is not an available bolt`
+    );
+  }
+  const beforeBullets = KDMapData.Bullets?.length ?? 0;
+  const cast = KinkyDungeonCastSpell(
+    target.x,
+    target.y,
+    spell,
+    source,
+    target
+  );
+  if (cast?.result !== "Cast" || !cast?.data?.bulletfired) {
+    throw new Error(
+      `Mixed-combat spell ${plan.spellName} did not launch a bullet`
+    );
+  }
+  return {
+    turnIndex,
+    sourceId: source.id,
+    sourceName: source.Enemy.name,
+    targetId: target.id,
+    targetName: target.Enemy?.name,
+    spellName: spell.name,
+    result: cast.result,
+    bulletFired: true,
+    beforeBullets,
+    afterBullets: KDMapData.Bullets?.length ?? 0
+  };
+}
+
+function runCrowdedTurns(turns, includeState, beforeTurn) {
   "use strict";
 
   includeState = includeState === true;
   const perTurnMilliseconds = [];
+  const actionTrace = [];
   for (let index = 0; index < turns; index += 1) {
     const started = performance.now();
+    if (typeof beforeTurn === "function") {
+      const action = beforeTurn(index);
+      if (action !== undefined) actionTrace.push(action);
+    }
     KinkyDungeonAdvanceTime(1, false, true);
     perTurnMilliseconds.push(performance.now() - started);
   }
@@ -25425,6 +26849,7 @@ function runCrowdedTurns(turns, includeState) {
       .map((enemy) => ({
         i: enemy.kdHybridTurnProfileIndex,
         id: enemy.id,
+        name: enemy.Enemy?.name,
         x: enemy.x,
         y: enemy.y,
         gx: enemy.gx,
@@ -25442,7 +26867,11 @@ function runCrowdedTurns(turns, includeState) {
         action: enemy.action,
         attackPoints: enemy.attackPoints,
         movePoints: enemy.movePoints,
+        castCooldown: enemy.castCooldown,
+        castCooldownSpecial: enemy.castCooldownSpecial,
         specialCD: enemy.specialCD,
+        usingSpecial: enemy.usingSpecial,
+        spellRdy: enemy.spellRdy,
         boundLevel: enemy.boundLevel,
         distraction: enemy.distraction,
         stun: enemy.stun,
@@ -25463,12 +26892,18 @@ function runCrowdedTurns(turns, includeState) {
       name: item.name,
       x: item.x,
       y: item.y
-    }))
+    })),
+    playerBuffs: KinkyDungeonPlayerBuffs,
+    bullets: KDMapData.Bullets,
+    effectTiles: Object.entries(KDMapData.EffectTiles ?? {}).sort(
+      ([left], [right]) => left.localeCompare(right)
+    )
   };
   return {
     perTurnMilliseconds,
     totalMilliseconds,
     averageMilliseconds: totalMilliseconds / turns,
+    actionTrace,
     remainingProfileEnemies: KDMapData.Entities.filter(
       (enemy) => enemy.kdHybridTurnProfile
     ).length,

@@ -12,6 +12,18 @@ Open PowerShell in this folder and run:
 
   .\KDHybrid-Patcher.ps1 -Action Install -GameRoot "C:\Path\To\Kinky Dungeon"
 
+The default texture mode is `auto`, which selects KD's official mobile atlas
+on the supported build. You can instead install with `original`, `full`, or
+`mobile`:
+
+  .\KDHybrid-Patcher.ps1 -Action Install -GameRoot "C:\Path\To\Kinky Dungeon" -TextureMode full
+
+Change only the installed texture mode later:
+
+  .\KDHybrid-Patcher.ps1 -Action Configure -GameRoot "C:\Path\To\Kinky Dungeon" -TextureMode original
+
+Texture-mode changes take effect the next time Kinky Dungeon starts.
+
 Check it later:
 
   .\KDHybrid-Patcher.ps1 -Action Status -GameRoot "C:\Path\To\Kinky Dungeon"

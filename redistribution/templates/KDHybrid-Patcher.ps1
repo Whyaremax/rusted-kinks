@@ -5,6 +5,8 @@ param(
     [string]$GameRoot,
     [ValidateSet("quality", "fast", "human")]
     [string]$PathfindingMode = "fast",
+    [ValidateSet("auto", "original", "full", "mobile")]
+    [string]$TextureMode = "auto",
     [switch]$NoSourceOptimizations
 )
 
@@ -73,14 +75,34 @@ if ($Action -eq "Install") {
         "5.4.92",
         "--pathfinding-mode",
         $PathfindingMode,
+        "--texture-mode",
+        $TextureMode,
         "--source-optimizations",
         (-not $NoSourceOptimizations).ToString().ToLowerInvariant()
     )
 } elseif ($Action -eq "Configure") {
-    $arguments += @(
-        "--pathfinding-mode",
-        $PathfindingMode
-    )
+    $settingsAdded = 0
+    if ($PSBoundParameters.ContainsKey("PathfindingMode")) {
+        $arguments += @(
+            "--pathfinding-mode",
+            $PathfindingMode
+        )
+        $settingsAdded += 1
+    }
+    if ($PSBoundParameters.ContainsKey("TextureMode")) {
+        $arguments += @(
+            "--texture-mode",
+            $TextureMode
+        )
+        $settingsAdded += 1
+    }
+    if ($settingsAdded -eq 0) {
+        # Preserve the original wrapper behavior for a bare Configure action.
+        $arguments += @(
+            "--pathfinding-mode",
+            $PathfindingMode
+        )
+    }
 }
 
 Write-Host "KD Hybrid $Action"
