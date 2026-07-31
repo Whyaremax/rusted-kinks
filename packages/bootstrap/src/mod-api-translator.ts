@@ -57,11 +57,7 @@ const API_TRANSLATIONS = Object.freeze({
   DrawTextFitKD: translation("DrawTextFitKD", "ui-only", "no-native-state"),
   KDDraw: translation("KDDraw", "ui-only", "no-native-state"),
   KDTex: translation("KDTex", "ui-only", "no-native-state"),
-  KDDrawChibi: translation(
-    "KDDrawChibi",
-    "ui-only",
-    "no-native-state",
-  ),
+  KDDrawChibi: translation("KDDrawChibi", "ui-only", "no-native-state"),
   KDGetOrMakeRenderTexture: translation(
     "KDGetOrMakeRenderTexture",
     "ui-only",
@@ -235,11 +231,7 @@ const API_TRANSLATIONS = Object.freeze({
     "no-native-state",
   ),
   DrawTextKD: translation("DrawTextKD", "ui-only", "no-native-state"),
-  DrawButtonKDEx: translation(
-    "DrawButtonKDEx",
-    "ui-only",
-    "no-native-state",
-  ),
+  DrawButtonKDEx: translation("DrawButtonKDEx", "ui-only", "no-native-state"),
   KinkyDungeonMakeNoise: translation(
     "KinkyDungeonMakeNoise",
     "event-dispatch",
@@ -351,16 +343,8 @@ const API_TRANSLATIONS = Object.freeze({
     "read-only",
     "no-native-state",
   ),
-  KDEnemyName: translation(
-    "KDEnemyName",
-    "read-only",
-    "no-native-state",
-  ),
-  KDRestraint: translation(
-    "KDRestraint",
-    "read-only",
-    "no-native-state",
-  ),
+  KDEnemyName: translation("KDEnemyName", "read-only", "no-native-state"),
+  KDRestraint: translation("KDRestraint", "read-only", "no-native-state"),
   KDItemDataQuery: translation(
     "KDItemDataQuery",
     "read-only",
@@ -371,11 +355,7 @@ const API_TRANSLATIONS = Object.freeze({
     "read-only",
     "no-native-state",
   ),
-  KDistEuclidean: translation(
-    "KDistEuclidean",
-    "read-only",
-    "no-native-state",
-  ),
+  KDistEuclidean: translation("KDistEuclidean", "read-only", "no-native-state"),
   KDFactionRelation: translation(
     "KDFactionRelation",
     "read-only",
@@ -397,21 +377,9 @@ const API_TRANSLATIONS = Object.freeze({
     "no-native-state",
   ),
   KDHelpless: translation("KDHelpless", "read-only", "no-native-state"),
-  KDIsImprisoned: translation(
-    "KDIsImprisoned",
-    "read-only",
-    "no-native-state",
-  ),
-  KDCanSeeEnemy: translation(
-    "KDCanSeeEnemy",
-    "read-only",
-    "no-native-state",
-  ),
-  KDEnemyHasFlag: translation(
-    "KDEnemyHasFlag",
-    "read-only",
-    "no-native-state",
-  ),
+  KDIsImprisoned: translation("KDIsImprisoned", "read-only", "no-native-state"),
+  KDCanSeeEnemy: translation("KDCanSeeEnemy", "read-only", "no-native-state"),
+  KDEnemyHasFlag: translation("KDEnemyHasFlag", "read-only", "no-native-state"),
   KinkyDungeonCanPlay: translation(
     "KinkyDungeonCanPlay",
     "read-only",
@@ -422,11 +390,7 @@ const API_TRANSLATIONS = Object.freeze({
     "read-only",
     "no-native-state",
   ),
-  KDEnemyCanTalk: translation(
-    "KDEnemyCanTalk",
-    "read-only",
-    "no-native-state",
-  ),
+  KDEnemyCanTalk: translation("KDEnemyCanTalk", "read-only", "no-native-state"),
   KDAllied: translation("KDAllied", "read-only", "no-native-state"),
   KDEntityHasFlag: translation(
     "KDEntityHasFlag",
@@ -439,16 +403,8 @@ const API_TRANSLATIONS = Object.freeze({
     "read-only",
     "no-native-state",
   ),
-  KDGetFaction: translation(
-    "KDGetFaction",
-    "read-only",
-    "no-native-state",
-  ),
-  KDistChebyshev: translation(
-    "KDistChebyshev",
-    "read-only",
-    "no-native-state",
-  ),
+  KDGetFaction: translation("KDGetFaction", "read-only", "no-native-state"),
+  KDistChebyshev: translation("KDistChebyshev", "read-only", "no-native-state"),
   KinkyDungeonCheckLOS: translation(
     "KinkyDungeonCheckLOS",
     "read-only",
@@ -464,36 +420,16 @@ const API_TRANSLATIONS = Object.freeze({
     "read-only",
     "no-native-state",
   ),
-  KDIsInParty: translation(
-    "KDIsInParty",
-    "read-only",
-    "no-native-state",
-  ),
-  KDIsServant: translation(
-    "KDIsServant",
-    "read-only",
-    "no-native-state",
-  ),
-  KDIsHumanoid: translation(
-    "KDIsHumanoid",
-    "read-only",
-    "no-native-state",
-  ),
-  KDIsImmobile: translation(
-    "KDIsImmobile",
-    "read-only",
-    "no-native-state",
-  ),
+  KDIsInParty: translation("KDIsInParty", "read-only", "no-native-state"),
+  KDIsServant: translation("KDIsServant", "read-only", "no-native-state"),
+  KDIsHumanoid: translation("KDIsHumanoid", "read-only", "no-native-state"),
+  KDIsImmobile: translation("KDIsImmobile", "read-only", "no-native-state"),
   KinkyDungeonIsDisabled: translation(
     "KinkyDungeonIsDisabled",
     "read-only",
     "no-native-state",
   ),
-  KDBoundEffects: translation(
-    "KDBoundEffects",
-    "read-only",
-    "no-native-state",
-  ),
+  KDBoundEffects: translation("KDBoundEffects", "read-only", "no-native-state"),
   KDGetFactionOriginal: translation(
     "KDGetFactionOriginal",
     "read-only",
@@ -519,8 +455,7 @@ export interface AuditedLegacyModProfile {
   readonly javascriptEvents: readonly string[];
   readonly replacedGlobals: readonly string[];
   readonly directWrites: readonly string[];
-  readonly safeSourceOptimizations:
-    readonly MapGenerationSourceOptimization[];
+  readonly safeSourceOptimizations: readonly MapGenerationSourceOptimization[];
 }
 
 const ALL_MAP_GENERATION_SOURCE_OPTIMIZATIONS =
@@ -624,11 +559,7 @@ export const AUDITED_LEGACY_MOD_PROFILES = Object.freeze([
       "bullet.afterBulletHit.BreachExplosive",
     ],
     replacedGlobals: [],
-    directWrites: [
-      "spell.events",
-      "tile.Type",
-      "KinkyDungeonUpdateLightGrid",
-    ],
+    directWrites: ["spell.events", "tile.Type", "KinkyDungeonUpdateLightGrid"],
     safeSourceOptimizations: ALL_MAP_GENERATION_SOURCE_OPTIMIZATIONS,
   }),
 ] satisfies readonly AuditedLegacyModProfile[]);
@@ -658,12 +589,7 @@ export type LegacyModArchiveReader = (
 ) => Promise<readonly LegacyModArchiveEntry[]>;
 
 export type LegacyModTranslationState =
-  | "idle"
-  | "inspecting"
-  | "compatible"
-  | "fallback"
-  | "failed"
-  | "disposed";
+  "idle" | "inspecting" | "compatible" | "fallback" | "failed" | "disposed";
 
 export interface LegacyModTranslationProfileStatus {
   readonly id: string;
@@ -679,13 +605,14 @@ export interface LegacyModTranslationStatus {
   readonly reason: string | null;
   readonly archiveCount: number;
   readonly profiles: readonly LegacyModTranslationProfileStatus[];
-  readonly allowedSourceOptimizations:
-    readonly MapGenerationSourceOptimization[];
+  readonly allowedSourceOptimizations: readonly MapGenerationSourceOptimization[];
 }
 
 export interface KDHybridModCompatibilityApi {
   readonly version: 1;
-  inspect(archives: readonly LegacyModArchive[]): Promise<LegacyModTranslationStatus>;
+  inspect(
+    archives: readonly LegacyModArchive[],
+  ): Promise<LegacyModTranslationStatus>;
   allowsSourceOptimization(
     optimization: MapGenerationSourceOptimization,
     loadedFiles: unknown,
@@ -736,23 +663,19 @@ export function createLegacyModTranslator(
   const digest = options.digest ?? sha256Blob;
   const readArchive = options.readArchive ?? readArchiveWithKDZipModel;
   const maxArchives = options.maxArchives ?? DEFAULT_MAX_ARCHIVES;
-  const maxArchiveBytes =
-    options.maxArchiveBytes ?? DEFAULT_MAX_ARCHIVE_BYTES;
+  const maxArchiveBytes = options.maxArchiveBytes ?? DEFAULT_MAX_ARCHIVE_BYTES;
   const maxTotalBytes = options.maxTotalBytes ?? DEFAULT_MAX_TOTAL_BYTES;
   const maxArchiveEntries =
     options.maxArchiveEntries ?? DEFAULT_MAX_ARCHIVE_ENTRIES;
-  const maxTotalEntries =
-    options.maxTotalEntries ?? DEFAULT_MAX_TOTAL_ENTRIES;
+  const maxTotalEntries = options.maxTotalEntries ?? DEFAULT_MAX_TOTAL_ENTRIES;
   const maxExecutableFiles =
     options.maxExecutableFiles ?? DEFAULT_MAX_EXECUTABLE_FILES;
   const maxTotalExecutableFiles =
-    options.maxTotalExecutableFiles ??
-    DEFAULT_MAX_TOTAL_EXECUTABLE_FILES;
+    options.maxTotalExecutableFiles ?? DEFAULT_MAX_TOTAL_EXECUTABLE_FILES;
   const maxExecutableBytes =
     options.maxExecutableBytes ?? DEFAULT_MAX_EXECUTABLE_BYTES;
   const maxTotalExecutableBytes =
-    options.maxTotalExecutableBytes ??
-    DEFAULT_MAX_TOTAL_EXECUTABLE_BYTES;
+    options.maxTotalExecutableBytes ?? DEFAULT_MAX_TOTAL_EXECUTABLE_BYTES;
   const readLimits = Object.freeze({
     maxEntries: maxArchiveEntries,
     maxExecutableFiles,
@@ -968,9 +891,7 @@ export function createLegacyModTranslator(
         ) {
           return false;
         }
-        actualEntries.push(
-          (entry as { readonly filename: string }).filename,
-        );
+        actualEntries.push((entry as { readonly filename: string }).filename);
       }
       actualEntries.sort((left, right) => left.localeCompare(right));
       return (
@@ -1068,9 +989,7 @@ export interface KinkyDungeonModTranslatorHandle {
   dispose(): void;
 }
 
-declare let KDExecuteMods:
-  | ((...args: unknown[]) => unknown)
-  | undefined;
+declare let KDExecuteMods: ((...args: unknown[]) => unknown) | undefined;
 declare let KDModLoadOrder: readonly KDModLoaderEntry[] | undefined;
 
 const browserLoaderEnvironment: KDModLoaderEnvironment = {
@@ -1100,7 +1019,8 @@ const browserLoaderEnvironment: KDModLoaderEnvironment = {
     }
   },
   schedule: (callback, delayMs) => setTimeout(callback, delayMs),
-  cancelScheduled: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+  cancelScheduled: (handle) =>
+    clearTimeout(handle as ReturnType<typeof setTimeout>),
 };
 
 export function installKinkyDungeonModTranslator(
@@ -1491,8 +1411,7 @@ function createContentInspectedProfile(
       javascriptEvents: [...javascriptEvents].sort(),
       replacedGlobals: [...replacedGlobals].sort(),
       directWrites: [...directWrites].sort(),
-      safeSourceOptimizations:
-        ALL_MAP_GENERATION_SOURCE_OPTIMIZATIONS,
+      safeSourceOptimizations: ALL_MAP_GENERATION_SOURCE_OPTIMIZATIONS,
     }),
     reason: "",
     entryCount: entries.length,
@@ -1632,7 +1551,7 @@ interface KDZipModel {
 
 declare const model: KDZipModel | undefined;
 
-async function readArchiveWithKDZipModel(
+export async function readArchiveWithKDZipModel(
   archive: LegacyModArchive,
   limits: LegacyModArchiveReadLimits,
 ): Promise<readonly LegacyModArchiveEntry[]> {
@@ -1740,9 +1659,7 @@ async function readArchiveWithKDZipModel(
   return Object.freeze(result);
 }
 
-function isPromiseLike(
-  value: unknown,
-): value is PromiseLike<unknown> {
+function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
   return (
     (typeof value === "object" || typeof value === "function") &&
     value !== null &&
@@ -1764,9 +1681,7 @@ function translation(
   return Object.freeze({ api, effect, nativeHandling });
 }
 
-function profile(
-  value: AuditedLegacyModProfile,
-): AuditedLegacyModProfile {
+function profile(value: AuditedLegacyModProfile): AuditedLegacyModProfile {
   return Object.freeze({
     ...value,
     archiveEntries: Object.freeze([...value.archiveEntries]),
@@ -1774,9 +1689,7 @@ function profile(
     javascriptEvents: Object.freeze([...value.javascriptEvents]),
     replacedGlobals: Object.freeze([...value.replacedGlobals]),
     directWrites: Object.freeze([...value.directWrites]),
-    safeSourceOptimizations: Object.freeze([
-      ...value.safeSourceOptimizations,
-    ]),
+    safeSourceOptimizations: Object.freeze([...value.safeSourceOptimizations]),
   });
 }
 

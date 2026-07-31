@@ -242,7 +242,15 @@ function Show-Status {
     $liveHash = (Get-FileHash -LiteralPath $liveMain -Algorithm SHA256).Hash.ToLowerInvariant()
     $testHash = (Get-FileHash -LiteralPath $testMain -Algorithm SHA256).Hash.ToLowerInvariant()
     $sourcePatch = $patcher.manifest.sourcePatch
-    $expectedTestHash = if ($sourcePatch -and $sourcePatch.patchedSha256) {
+    $sourcePatchEnabled = [bool](
+        $sourcePatch -and
+        $sourcePatch.patchedSha256 -and
+        (
+            -not ($sourcePatch.PSObject.Properties.Name -contains "enabled") -or
+            $sourcePatch.enabled -ne $false
+        )
+    )
+    $expectedTestHash = if ($sourcePatchEnabled) {
         [string]$sourcePatch.patchedSha256
     } else {
         $liveHash
@@ -264,7 +272,7 @@ function Show-Status {
         developerTestMode = $electronText.Contains($developerMarker)
         liveAndTestBundleMatch = $liveHash -eq $testHash
         bundleMatchesManifest = $expectedTestHash -eq $testHash
-        sourcePatchActive = [bool]$sourcePatch
+        sourcePatchActive = $sourcePatchEnabled
         sourcePatch = $sourcePatch
         bundleSha256 = $testHash
         patcher = $patcher

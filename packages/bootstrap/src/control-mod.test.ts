@@ -2,11 +2,16 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   installKDHybridControlMod,
-  type KDHybridControlModStatus
+  type KDHybridControlModStatus,
 } from "./control-mod.js";
 import type { KDHybridModBridgeApi } from "./mod-bridge-host.js";
 
-function fixture(options: { readonly native?: boolean } = {}) {
+function fixture(
+  options: {
+    readonly native?: boolean;
+    readonly preflight?: boolean;
+  } = {},
+) {
   const configs: Record<string, unknown[]> = {};
   let settings: Record<string, unknown> = {};
   const events: {
@@ -20,7 +25,7 @@ function fixture(options: { readonly native?: boolean } = {}) {
     settings: next,
     activeTextureMode: "mobile" as const,
     restartRequired: next.textureMode !== "mobile",
-    applyCount: 1
+    applyCount: 1,
   }));
   const bridge: KDHybridModBridgeApi | undefined =
     options.native === false
@@ -33,22 +38,32 @@ function fixture(options: { readonly native?: boolean } = {}) {
             settings: {
               pathfindingMode: "fast",
               textureMode: "mobile",
-              adaptiveFramePacing: true
+              adaptiveFramePacing: true,
             },
             activeTextureMode: "mobile",
             restartRequired: false,
-            applyCount: 0
+            applyCount: 0,
           }),
-          applySettings
+          applySettings,
         };
   const target: {
     KDHybridModBridge?: KDHybridModBridgeApi;
+    KDHybridModPreflight?: {
+      showManager(): void;
+    };
     KDHybridControlMod?: {
       status(): KDHybridControlModStatus;
       dispose(): void;
     };
   } = {
-    ...(bridge === undefined ? {} : { KDHybridModBridge: bridge })
+    ...(bridge === undefined ? {} : { KDHybridModBridge: bridge }),
+    ...(options.preflight === false
+      ? {}
+      : {
+          KDHybridModPreflight: {
+            showManager: vi.fn(),
+          },
+        }),
   };
   return {
     configs,
@@ -68,8 +83,8 @@ function fixture(options: { readonly native?: boolean } = {}) {
       events,
       addText: (key: string, value: string) => {
         text.set(key, value);
-      }
-    }
+      },
+    },
   };
 }
 
@@ -78,7 +93,7 @@ describe("genuine KD Hybrid control mod", () => {
     const state = fixture();
     const handle = installKDHybridControlMod({
       target: state.target,
-      bindings: state.bindings
+      bindings: state.bindings,
     });
 
     expect(state.target.KDHybridControlMod).toBe(handle);
@@ -87,15 +102,33 @@ describe("genuine KD Hybrid control mod", () => {
       expect.objectContaining({ type: "list", refvar: "textureMode" }),
       expect.objectContaining({
         type: "boolean",
-        refvar: "adaptiveFramePacing"
+        refvar: "adaptiveFramePacing",
+      }),
+      expect.objectContaining({
+        type: "button",
+        refvar: "modCompatibility",
       }),
       expect.objectContaining({ type: "text", refvar: "nativeStatus" }),
-      expect.objectContaining({ type: "text", refvar: "textureRestart" })
+      expect.objectContaining({ type: "text", refvar: "textureRestart" }),
     ]);
     expect(state.text.get("KDModButtonKDHybrid")).toBe("KD Hybrid");
     expect(state.text.get("KDModButtonnativeStatus")).toContain(
-      "Native bridge v0.1.1 ready"
+      "Native bridge v0.1.1 ready",
     );
+    const manager = state.configs.KDHybrid?.find(
+      (entry) =>
+        (entry as { readonly refvar?: unknown }).refvar === "modCompatibility",
+    ) as
+      | {
+          readonly click: () => boolean;
+          readonly block: () => boolean;
+        }
+      | undefined;
+    expect(manager?.block()).toBe(false);
+    expect(manager?.click()).toBe(true);
+    expect(
+      state.target.KDHybridModPreflight?.showManager,
+    ).toHaveBeenCalledOnce();
 
     handle.dispose();
     expect(state.configs.KDHybrid).toBeUndefined();
@@ -106,12 +139,12 @@ describe("genuine KD Hybrid control mod", () => {
     const state = fixture();
     installKDHybridControlMod({
       target: state.target,
-      bindings: state.bindings
+      bindings: state.bindings,
     });
     state.settings.KDHybrid = {
       pathfindingMode: "human",
       textureMode: "full",
-      adaptiveFramePacing: false
+      adaptiveFramePacing: false,
     };
 
     state.events.afterModSettingsLoad?.KDHybrid?.({});
@@ -119,7 +152,7 @@ describe("genuine KD Hybrid control mod", () => {
     expect(state.applySettings).toHaveBeenCalledWith({
       pathfindingMode: "human",
       textureMode: "full",
-      adaptiveFramePacing: false
+      adaptiveFramePacing: false,
     });
   });
 
@@ -127,7 +160,7 @@ describe("genuine KD Hybrid control mod", () => {
     const state = fixture({ native: false });
     const handle = installKDHybridControlMod({
       target: state.target,
-      bindings: state.bindings
+      bindings: state.bindings,
     });
 
     state.events.afterModSettingsLoad?.KDHybrid?.({});
@@ -135,10 +168,30 @@ describe("genuine KD Hybrid control mod", () => {
     expect(handle.status()).toMatchObject({
       installed: true,
       nativeAvailable: false,
-      lastError: "native-bridge-unavailable"
+      lastError: "native-bridge-unavailable",
     });
     expect(state.text.get("KDModButtonnativeStatus")).toContain(
-      "Reinstall the KD Hybrid patch"
+      "Reinstall the KD Hybrid patch",
     );
+  });
+
+  it("blocks only the compatibility manager action when preflight is absent", () => {
+    const state = fixture({ preflight: false });
+    installKDHybridControlMod({
+      target: state.target,
+      bindings: state.bindings,
+    });
+
+    const manager = state.configs.KDHybrid?.find(
+      (entry) =>
+        (entry as { readonly refvar?: unknown }).refvar === "modCompatibility",
+    ) as
+      | {
+          readonly click: () => boolean;
+          readonly block: () => boolean;
+        }
+      | undefined;
+    expect(manager?.block()).toBe(true);
+    expect(manager?.click()).toBe(true);
   });
 });

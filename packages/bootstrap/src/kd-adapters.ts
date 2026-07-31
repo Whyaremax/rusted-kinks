@@ -32,6 +32,8 @@ const MAX_NEARBY_OFFSET_TEMPLATES = 32;
 const MAX_ENEMY_CACHE_JOURNAL_CELLS = 8_192;
 const MAX_COMMANDER_HELP_REFRESH_SCANS = 16;
 export const KD_NEAREST_PLAYER_SOURCE_PATCH_VERSION = "5.4.92-source-v1";
+export const KD_ENEMY_POSITION_CACHE_COMPATIBILITY_FLAG =
+  "disableEnemyPositionCacheOptimizations";
 const ENEMY_SELECTOR_ANGER_TAGS = Object.freeze([
   "imprisonable",
   "ropeAnger",
@@ -180,6 +182,46 @@ export function hasKDNearestPlayerSourcePatch(): boolean {
   return (
     sourcePatches?.nearestPlayer === KD_NEAREST_PLAYER_SOURCE_PATCH_VERSION
   );
+}
+
+/**
+ * Reads the session compatibility flag without invoking mod-owned accessors.
+ * Unknown or hostile descriptor shapes fail closed to KD's official code.
+ */
+export function kdEnemyPositionCacheOptimizationsEnabled(
+  target: object = globalThis,
+): boolean {
+  try {
+    const controlDescriptor = Object.getOwnPropertyDescriptor(
+      target,
+      "KDHybridSourcePatchControl",
+    );
+    if (controlDescriptor === undefined) {
+      return true;
+    }
+    if (
+      !("value" in controlDescriptor) ||
+      typeof controlDescriptor.value !== "object" ||
+      controlDescriptor.value === null
+    ) {
+      return false;
+    }
+    const control = controlDescriptor.value;
+    const prototype = Object.getPrototypeOf(control);
+    if (prototype !== Object.prototype && prototype !== null) {
+      return false;
+    }
+    const flagDescriptor = Object.getOwnPropertyDescriptor(
+      control,
+      KD_ENEMY_POSITION_CACHE_COMPATIBILITY_FLAG,
+    );
+    if (flagDescriptor === undefined) {
+      return true;
+    }
+    return "value" in flagDescriptor && flagDescriptor.value === false;
+  } catch {
+    return false;
+  }
 }
 
 const KNOWN_COMMANDER_ORDER_FINGERPRINT = "689f0641fa0c7af8";
@@ -2556,6 +2598,7 @@ export function createKDEnemyUpdateCacheHandler(
   ): CompletedJavaScriptCall | NativeFallbackRequest {
     if (
       transaction !== null ||
+      !kdEnemyPositionCacheOptimizationsEnabled() ||
       !environment.compatible() ||
       environment.moveFunction() === undefined
     ) {
@@ -2808,6 +2851,9 @@ export function createKDNearbyEnemiesHandler(
     chebyshevArgument?: unknown,
     nonhostileEnemy?: unknown,
   ): NearbyAdapterResult => {
+    if (!kdEnemyPositionCacheOptimizationsEnabled()) {
+      return useJavaScriptFallback();
+    }
     const x = safeInteger(xArgument);
     const y = safeInteger(yArgument);
     const distance = finiteNonnegative(distanceArgument);
@@ -2975,6 +3021,7 @@ export function createKDFindMasterHandler(
 
   return (enemyArgument?: unknown): FindMasterAdapterResult => {
     if (
+      !kdEnemyPositionCacheOptimizationsEnabled() ||
       environment.compatible() === false ||
       typeof enemyArgument !== "object" ||
       enemyArgument === null
@@ -3874,10 +3921,7 @@ export function installKinkyDungeonMapGenerationAdapter(
             },
           );
         },
-        runWithTranslatedModSourceOptimizations: (
-          callback,
-          recordActivation,
-        ) =>
+        runWithTranslatedModSourceOptimizations: (callback, recordActivation) =>
           runWithKDTranslatedModSourceOptimizations(
             callback,
             undefined,
@@ -4749,8 +4793,7 @@ function browserMapGenerationDirectPathfindingFallbackEnabled(): boolean {
 
 function browserRecordTranslatedModSourceOptimization(active: boolean): void {
   const stats =
-    globalThis.KDHybridRuntimeControl
-      ?.translatedModSourceOptimizationStats;
+    globalThis.KDHybridRuntimeControl?.translatedModSourceOptimizationStats;
   if (stats === undefined) {
     return;
   }

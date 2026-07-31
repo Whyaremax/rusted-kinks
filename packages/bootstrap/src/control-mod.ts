@@ -1,7 +1,8 @@
 import type {
   KDHybridModBridgeApi,
-  KDHybridModSettings
+  KDHybridModSettings,
 } from "./mod-bridge-host.js";
+import type { KinkyDungeonModPreflightHandle } from "./mod-preflight-host.js";
 
 const MOD_ID = "KDHybrid";
 
@@ -18,15 +19,18 @@ declare function addTextKey(key: string, value: string): void;
 
 interface KDModConfig {
   readonly name: string;
-  readonly type: "boolean" | "list" | "text";
+  readonly type: "boolean" | "button" | "list" | "text";
   readonly refvar: string;
   readonly default?: boolean | string;
   readonly options?: readonly string[];
+  readonly click?: (...args: unknown[]) => boolean;
+  readonly block?: () => boolean;
 }
 
 interface ControlModTarget {
   KDHybridModBridge?: KDHybridModBridgeApi;
   KDHybridControlMod?: KDHybridControlModHandle;
+  KDHybridModPreflight?: Pick<KinkyDungeonModPreflightHandle, "showManager">;
 }
 
 interface ControlModBindings {
@@ -58,7 +62,7 @@ export interface KDHybridControlModOptions {
 }
 
 export function installKDHybridControlMod(
-  options: KDHybridControlModOptions = {}
+  options: KDHybridControlModOptions = {},
 ): KDHybridControlModHandle {
   const target = options.target ?? (globalThis as ControlModTarget);
   const existing = target.KDHybridControlMod;
@@ -83,14 +87,14 @@ export function installKDHybridControlMod(
         target.KDHybridModBridge?.status().settings ?? {
           pathfindingMode: "fast",
           textureMode: "mobile",
-          adaptiveFramePacing: true
+          adaptiveFramePacing: true,
         }
       );
     } catch {
       return {
         pathfindingMode: "fast",
         textureMode: "mobile",
-        adaptiveFramePacing: true
+        adaptiveFramePacing: true,
       };
     }
   };
@@ -109,7 +113,7 @@ export function installKDHybridControlMod(
       adaptiveFramePacing:
         typeof current?.adaptiveFramePacing === "boolean"
           ? current.adaptiveFramePacing
-          : fallback.adaptiveFramePacing
+          : fallback.adaptiveFramePacing,
     };
     root[MOD_ID] = { ...settings };
     bindings.setSettings(root);
@@ -118,7 +122,8 @@ export function installKDHybridControlMod(
 
   const registerText = (): void => {
     const host = target.KDHybridModBridge;
-    let statusText = "Native bridge unavailable. Reinstall the KD Hybrid patch.";
+    let statusText =
+      "Native bridge unavailable. Reinstall the KD Hybrid patch.";
     if (host !== undefined) {
       try {
         const status = host.status();
@@ -132,14 +137,15 @@ export function installKDHybridControlMod(
     bindings.addText(`KDModButton${MOD_ID}`, "KD Hybrid");
     bindings.addText("KDModButtonpathfindingMode", "Pathfinding mode");
     bindings.addText("KDModButtontextureMode", "Texture resolution");
+    bindings.addText("KDModButtonadaptiveFramePacing", "Adaptive frame pacing");
     bindings.addText(
-      "KDModButtonadaptiveFramePacing",
-      "Adaptive frame pacing"
+      "KDModButtonmodCompatibility",
+      "Manage mod compatibility choices",
     );
     bindings.addText("KDModButtonnativeStatus", statusText);
     bindings.addText(
       "KDModButtontextureRestart",
-      "Texture resolution changes apply after restarting KD."
+      "Texture resolution changes apply after restarting KD.",
     );
   };
 
@@ -166,31 +172,41 @@ export function installKDHybridControlMod(
       type: "list",
       refvar: "pathfindingMode",
       options: ["fast", "quality", "human"],
-      default: defaults().pathfindingMode
+      default: defaults().pathfindingMode,
     },
     {
       name: "Texture resolution",
       type: "list",
       refvar: "textureMode",
       options: ["mobile", "full", "original"],
-      default: defaults().textureMode
+      default: defaults().textureMode,
     },
     {
       name: "Adaptive frame pacing",
       type: "boolean",
       refvar: "adaptiveFramePacing",
-      default: defaults().adaptiveFramePacing
+      default: defaults().adaptiveFramePacing,
+    },
+    {
+      name: "Manage mod compatibility choices",
+      type: "button",
+      refvar: "modCompatibility",
+      click: () => {
+        target.KDHybridModPreflight?.showManager();
+        return true;
+      },
+      block: () => target.KDHybridModPreflight === undefined,
     },
     {
       name: "Native bridge status",
       type: "text",
-      refvar: "nativeStatus"
+      refvar: "nativeStatus",
     },
     {
       name: "Texture restart reminder",
       type: "text",
-      refvar: "textureRestart"
-    }
+      refvar: "textureRestart",
+    },
   ];
 
   registerText();
@@ -214,7 +230,7 @@ export function installKDHybridControlMod(
         installed: !disposed,
         nativeAvailable: target.KDHybridModBridge !== undefined,
         settings: Object.freeze({ ...ensureSettings() }),
-        lastError
+        lastError,
       }),
     dispose: () => {
       if (disposed) {
@@ -245,7 +261,7 @@ export function installKDHybridControlMod(
       if (target.KDHybridControlMod === handle) {
         delete target.KDHybridControlMod;
       }
-    }
+    },
   });
 
   target.KDHybridControlMod = handle;
@@ -269,7 +285,7 @@ function resolveGlobalBindings(): ControlModBindings | null {
         KDModSettings = settings;
       },
       events: KDEventMapGeneric,
-      addText: addTextKey
+      addText: addTextKey,
     };
   } catch {
     return null;
@@ -283,13 +299,13 @@ function record(value: unknown): UnknownRecord | null {
 }
 
 function isPathfindingMode(
-  value: unknown
+  value: unknown,
 ): value is KDHybridModSettings["pathfindingMode"] {
   return value === "fast" || value === "quality" || value === "human";
 }
 
 function isTextureMode(
-  value: unknown
+  value: unknown,
 ): value is KDHybridModSettings["textureMode"] {
   return value === "mobile" || value === "full" || value === "original";
 }

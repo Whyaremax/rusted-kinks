@@ -5,7 +5,7 @@ import {
   mkdtemp,
   readFile,
   rm,
-  writeFile
+  writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -15,13 +15,13 @@ import { describe, expect, it } from "vitest";
 
 const repositoryRoot = resolve(
   dirname(fileURLToPath(import.meta.url)),
-  "../../.."
+  "../../..",
 );
 const templatePath = join(
   repositoryRoot,
   "redistribution",
   "templates",
-  "KDHybrid-Patcher.ps1"
+  "KDHybrid-Patcher.ps1",
 );
 
 describe("PowerShell redistribution template", () => {
@@ -29,13 +29,13 @@ describe("PowerShell redistribution template", () => {
     const source = await readFile(templatePath, "utf8");
 
     expect(source).toContain(
-      '[ValidateSet("auto", "original", "full", "mobile")]'
+      '[ValidateSet("auto", "original", "full", "mobile")]',
     );
     expect(source).toContain('[ValidateSet("optimized", "original")]');
     expect(source).toContain('"--texture-mode"');
     expect(source).toContain('"--source-optimizations"');
-    expect(source).toContain("$PSBoundParameters.ContainsKey(\"TextureMode\")");
-    expect(source).toContain("$PSBoundParameters.ContainsKey(\"SourceMode\")");
+    expect(source).toContain('$PSBoundParameters.ContainsKey("TextureMode")');
+    expect(source).toContain('$PSBoundParameters.ContainsKey("SourceMode")');
   });
 
   it.skipIf(process.platform !== "win32")(
@@ -54,7 +54,7 @@ describe("PowerShell redistribution template", () => {
           mkdir(join(kitRoot, "tools"), { recursive: true }),
           mkdir(join(kitRoot, "bootstrap"), { recursive: true }),
           mkdir(join(appRoot, "out"), { recursive: true }),
-          mkdir(unrelatedCwd, { recursive: true })
+          mkdir(unrelatedCwd, { recursive: true }),
         ]);
         await Promise.all([
           copyFile(templatePath, scriptPath),
@@ -66,34 +66,29 @@ describe("PowerShell redistribution template", () => {
               "  process.env.KD_HYBRID_CAPTURE_PATH,",
               "  JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd() })",
               ");",
-              ""
-            ].join("\n")
+              "",
+            ].join("\n"),
           ),
           writeFile(
             join(kitRoot, "bootstrap", "version.json"),
-            '{"version":"test"}\n'
+            '{"version":"test"}\n',
           ),
           writeFile(join(appRoot, "index.html"), "<!doctype html>\n"),
-          writeFile(join(appRoot, "out", "main.js"), "void 0;\n")
+          writeFile(join(appRoot, "out", "main.js"), "void 0;\n"),
         ]);
 
-        runPatcher(
-          scriptPath,
-          unrelatedCwd,
-          capturePath,
-          [
-            "-Action",
-            "Install",
-            "-GameRoot",
-            gameRoot,
-            "-PathfindingMode",
-            "human",
-            "-TextureMode",
-            "mobile",
-            "-SourceMode",
-            "original"
-          ]
-        );
+        runPatcher(scriptPath, unrelatedCwd, capturePath, [
+          "-Action",
+          "Install",
+          "-GameRoot",
+          gameRoot,
+          "-PathfindingMode",
+          "human",
+          "-TextureMode",
+          "mobile",
+          "-SourceMode",
+          "original",
+        ]);
         const install = await readCapture(capturePath);
         expect(install.cwd).toBe(unrelatedCwd);
         expect(install.argv).toEqual([
@@ -109,91 +104,72 @@ describe("PowerShell redistribution template", () => {
           "--texture-mode",
           "mobile",
           "--source-optimizations",
-          "false"
+          "false",
         ]);
 
-        runPatcher(
-          scriptPath,
-          unrelatedCwd,
-          capturePath,
-          [
-            "-Action",
-            "Configure",
-            "-GameRoot",
-            appRoot,
-            "-TextureMode",
-            "original"
-          ]
-        );
+        runPatcher(scriptPath, unrelatedCwd, capturePath, [
+          "-Action",
+          "Configure",
+          "-GameRoot",
+          appRoot,
+          "-TextureMode",
+          "original",
+        ]);
         expect((await readCapture(capturePath)).argv).toEqual([
           "configure",
           "--app-root",
           appRoot,
           "--texture-mode",
-          "original"
+          "original",
         ]);
 
-        runPatcher(
-          scriptPath,
-          unrelatedCwd,
-          capturePath,
-          [
-            "-Action",
-            "Configure",
-            "-GameRoot",
-            appRoot,
-            "-SourceMode",
-            "optimized"
-          ]
-        );
+        runPatcher(scriptPath, unrelatedCwd, capturePath, [
+          "-Action",
+          "Configure",
+          "-GameRoot",
+          appRoot,
+          "-SourceMode",
+          "optimized",
+        ]);
         expect((await readCapture(capturePath)).argv).toEqual([
           "configure",
           "--app-root",
           appRoot,
           "--source-optimizations",
-          "true"
+          "true",
         ]);
 
-        runPatcher(
-          scriptPath,
-          unrelatedCwd,
-          capturePath,
-          [
-            "-Action",
-            "Configure",
-            "-GameRoot",
-            appRoot,
-            "-NoSourceOptimizations"
-          ]
-        );
+        runPatcher(scriptPath, unrelatedCwd, capturePath, [
+          "-Action",
+          "Configure",
+          "-GameRoot",
+          appRoot,
+          "-NoSourceOptimizations",
+        ]);
         expect((await readCapture(capturePath)).argv).toEqual([
           "configure",
           "--app-root",
           appRoot,
           "--source-optimizations",
-          "false"
+          "false",
         ]);
 
         const bareConfigure = runPatcher(
           scriptPath,
           unrelatedCwd,
           capturePath,
-          [
-            "-Action",
-            "Configure",
-            "-GameRoot",
-            appRoot
-          ],
-          false
+          ["-Action", "Configure", "-GameRoot", appRoot],
+          false,
         );
         expect(bareConfigure.status).not.toBe(0);
         expect(bareConfigure.stderr).toContain(
-          "Configure requires PathfindingMode, TextureMode, or SourceMode"
+          "Configure requires PathfindingMode, TextureMode, or SourceMode",
         );
       } finally {
         await rm(root, { recursive: true, force: true });
       }
-    }
+    },
+    15_000,
   );
 });
 
@@ -211,7 +187,7 @@ function runPatcher(
   cwd: string,
   capturePath: string,
   arguments_: readonly string[],
-  expectSuccess = true
+  expectSuccess = true,
 ): ReturnType<typeof spawnSync> {
   const result = spawnSync(
     "powershell.exe",
@@ -221,17 +197,17 @@ function runPatcher(
       "Bypass",
       "-File",
       scriptPath,
-      ...arguments_
+      ...arguments_,
     ],
     {
       cwd,
       encoding: "utf8",
       env: {
         ...process.env,
-        KD_HYBRID_CAPTURE_PATH: capturePath
+        KD_HYBRID_CAPTURE_PATH: capturePath,
       },
-      windowsHide: true
-    }
+      windowsHide: true,
+    },
   );
 
   expect(result.error).toBeUndefined();

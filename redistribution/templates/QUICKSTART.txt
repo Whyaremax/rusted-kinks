@@ -47,6 +47,24 @@ Remove the bootstrap and restore the backed-up game files:
 The patcher refuses unknown game bundles by default. Do not bypass that check
 unless you are developing and have independently verified compatibility.
 
+MOD COMPATIBILITY
+
+Before KD evaluates selected mod scripts, KD Hybrid scans their bounded source
+text as data and asks before a high-confidence conflict. Compatibility mode
+(recommended) routes only the affected optimization through KD's official
+JavaScript. You can instead keep the optimization explicitly or disable that
+mod for the activation without deleting its ZIP or changing KD's saved mod
+list.
+
+Remembered choices are tied to the exact mod digest and KD/Hybrid build. Change
+or forget them through "Manage mod compatibility choices" in the standard
+KD Hybrid mod settings.
+
+A source-sensitive mod may require the official source bundle. Mod loading
+will pause before any archive executes; close KD, configure
+`-SourceMode original`, and fully restart. Selecting original source after the
+page has already started cannot safely undo an installed source patch.
+
 MANUAL RESOURCE ZIP
 
 The default manual resource ZIP includes the exact-build optimized out/main.js.

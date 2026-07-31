@@ -21,6 +21,8 @@ import {
   createKDNearbyEnemiesHandler,
   createKinkyDungeonMapGenerationHandler,
   createKinkyDungeonPathfindingHandler,
+  KD_ENEMY_POSITION_CACHE_COMPATIBILITY_FLAG,
+  kdEnemyPositionCacheOptimizationsEnabled,
   runWithKDSourcePathCacheEdgeIdentitySkip,
   type KDCommanderEntity,
   type KDCommanderHelpEnvironment,
@@ -43,6 +45,88 @@ import {
   type KDNearbyEnemiesEnvironment,
   type KDPathfindingEnvironment,
 } from "./kd-adapters.js";
+
+function withEnemyPositionCacheCompatibilityDisabled<T>(callback: () => T): T {
+  const target = globalThis as typeof globalThis & {
+    KDHybridSourcePatchControl?: Record<string, unknown>;
+  };
+  const name = "KDHybridSourcePatchControl";
+  const previous = Object.getOwnPropertyDescriptor(target, name);
+  const control = {
+    [KD_ENEMY_POSITION_CACHE_COMPATIBILITY_FLAG]: true,
+  };
+  try {
+    Object.defineProperty(target, name, {
+      configurable: true,
+      enumerable: true,
+      value: control,
+      writable: true,
+    });
+    return callback();
+  } finally {
+    Reflect.deleteProperty(target, name);
+    if (previous !== undefined) {
+      Object.defineProperty(target, name, previous);
+    }
+  }
+}
+
+describe("enemy-position compatibility control", () => {
+  it("reads only plain data descriptors and fails closed on unknown shapes", () => {
+    expect(kdEnemyPositionCacheOptimizationsEnabled({})).toBe(true);
+    expect(
+      kdEnemyPositionCacheOptimizationsEnabled({
+        KDHybridSourcePatchControl: {
+          [KD_ENEMY_POSITION_CACHE_COMPATIBILITY_FLAG]: false,
+        },
+      }),
+    ).toBe(true);
+    expect(
+      kdEnemyPositionCacheOptimizationsEnabled({
+        KDHybridSourcePatchControl: {
+          [KD_ENEMY_POSITION_CACHE_COMPATIBILITY_FLAG]: true,
+        },
+      }),
+    ).toBe(false);
+    expect(
+      kdEnemyPositionCacheOptimizationsEnabled({
+        KDHybridSourcePatchControl: {
+          [KD_ENEMY_POSITION_CACHE_COMPATIBILITY_FLAG]: "unknown",
+        },
+      }),
+    ).toBe(false);
+
+    let rootGetterCalls = 0;
+    const rootAccessor = {};
+    Object.defineProperty(rootAccessor, "KDHybridSourcePatchControl", {
+      get: () => {
+        rootGetterCalls += 1;
+        return {};
+      },
+    });
+    expect(kdEnemyPositionCacheOptimizationsEnabled(rootAccessor)).toBe(false);
+    expect(rootGetterCalls).toBe(0);
+
+    let flagGetterCalls = 0;
+    const flagAccessor = {};
+    Object.defineProperty(
+      flagAccessor,
+      KD_ENEMY_POSITION_CACHE_COMPATIBILITY_FLAG,
+      {
+        get: () => {
+          flagGetterCalls += 1;
+          return false;
+        },
+      },
+    );
+    expect(
+      kdEnemyPositionCacheOptimizationsEnabled({
+        KDHybridSourcePatchControl: flagAccessor,
+      }),
+    ).toBe(false);
+    expect(flagGetterCalls).toBe(0);
+  });
+});
 
 class FixtureBridge {
   snapshot: Snapshot | null = null;
@@ -630,8 +714,7 @@ describe("Kinky Dungeon map-generation guard", () => {
       const result = runWithKDSourcePathCacheEdgeIdentitySkip(
         () => {
           expect(
-            target.KDHybridSourcePatchControl
-              ?.enablePathCacheEdgeIdentitySkip,
+            target.KDHybridSourcePatchControl?.enablePathCacheEdgeIdentitySkip,
           ).toBe(true);
           return "generated";
         },
@@ -1367,24 +1450,14 @@ describe("Kinky Dungeon enemy-selector invariant hoists", () => {
     });
 
     expect(
-      handler(
-        angerTags,
-        1,
-        "grv",
-        ".",
-        ["eligible"],
-        { requireHostile: "Player" },
-      ),
+      handler(angerTags, 1, "grv", ".", ["eligible"], {
+        requireHostile: "Player",
+      }),
     ).toMatchObject({ ok: true, value: first });
     expect(
-      handler(
-        angerTags,
-        1,
-        "grv",
-        ".",
-        ["eligible"],
-        { requireHostile: "Player" },
-      ),
+      handler(angerTags, 1, "grv", ".", ["eligible"], {
+        requireHostile: "Player",
+      }),
     ).toMatchObject({ ok: true, value: second });
     expect(test.randomCalls()).toBe(2);
     expect(weightedStats).toEqual({
@@ -1466,28 +1539,14 @@ describe("Kinky Dungeon enemy-selector invariant hoists", () => {
     });
 
     expect(
-      handler(
-        ["mushroom"],
-        1,
-        "grv",
-        ".",
-        undefined,
-        undefined,
-        undefined,
-        ["blocked"],
-      ),
+      handler(["mushroom"], 1, "grv", ".", undefined, undefined, undefined, [
+        "blocked",
+      ]),
     ).toMatchObject({ ok: true, value: allowed });
     expect(
-      handler(
-        ["mushroom"],
-        1,
-        "grv",
-        ".",
-        undefined,
-        undefined,
-        undefined,
-        ["blocked"],
-      ),
+      handler(["mushroom"], 1, "grv", ".", undefined, undefined, undefined, [
+        "blocked",
+      ]),
     ).toMatchObject({ ok: true, value: allowed });
     expect(test.randomCalls()).toBe(2);
     expect(weightedStats).toEqual({
@@ -1644,16 +1703,9 @@ describe("Kinky Dungeon enemy-selector invariant hoists", () => {
 
     for (let call = 0; call < 2; call += 1) {
       expect(
-        handler(
-          ["mushroom"],
-          1,
-          "grv",
-          ".",
-          undefined,
-          undefined,
-          undefined,
-          ["blocked"],
-        ),
+        handler(["mushroom"], 1, "grv", ".", undefined, undefined, undefined, [
+          "blocked",
+        ]),
       ).toMatchObject({ ok: true, value: allowed });
     }
     expect(handler(["mushroom"], 1, "grv", ".")).toMatchObject({
@@ -1747,14 +1799,16 @@ describe("Kinky Dungeon enemy-selector invariant hoists", () => {
       weightedQueryCacheStats: () => weightedStats,
     });
 
-    expect(
-      handler(angerTags, 1, "grv", ".", ["eligible"]),
-    ).toMatchObject({ ok: true, value: first });
+    expect(handler(angerTags, 1, "grv", ".", ["eligible"])).toMatchObject({
+      ok: true,
+      value: first,
+    });
     first.weight = 0;
     epoch = {};
-    expect(
-      handler(angerTags, 1, "grv", ".", ["eligible"]),
-    ).toMatchObject({ ok: true, value: second });
+    expect(handler(angerTags, 1, "grv", ".", ["eligible"])).toMatchObject({
+      ok: true,
+      value: second,
+    });
     expect(test.randomCalls()).toBe(2);
     expect(weightedStats).toEqual({
       optimizedCalls: 0,
@@ -1795,13 +1849,15 @@ describe("Kinky Dungeon enemy-selector invariant hoists", () => {
       weightedQueryCacheStats: () => weightedStats,
     });
 
-    expect(
-      handler(angerTags, 1, "grv", ".", ["eligible"]),
-    ).toMatchObject({ ok: true, value: first });
+    expect(handler(angerTags, 1, "grv", ".", ["eligible"])).toMatchObject({
+      ok: true,
+      value: first,
+    });
     enemies.push(third);
-    expect(
-      handler(angerTags, 1, "grv", ".", ["eligible"]),
-    ).toMatchObject({ ok: true, value: third });
+    expect(handler(angerTags, 1, "grv", ".", ["eligible"])).toMatchObject({
+      ok: true,
+      value: third,
+    });
     expect(test.randomCalls()).toBe(2);
     expect(weightedStats).toEqual({
       optimizedCalls: 0,
@@ -2090,6 +2146,25 @@ describe("Kinky Dungeon enemy-update position cache", () => {
     expect(isNativeFallbackRequest(handler(1, false))).toBe(true);
     expect(state.updateCalls()).toBe(0);
     expect(state.generation()).toBe(0);
+  });
+
+  it("honors the session cache control before reading or mutating update state", () => {
+    const state = fixture([{ id: 1, x: 1, y: 1 }]);
+    const handler = createKDEnemyUpdateCacheHandler({
+      ...state.environment,
+      compatible: () => {
+        throw new Error("compatibility dependencies must not be read");
+      },
+    });
+
+    const result = withEnemyPositionCacheCompatibilityDisabled(() =>
+      handler(1, false),
+    );
+
+    expect(isNativeFallbackRequest(result)).toBe(true);
+    expect(state.updateCalls()).toBe(0);
+    expect(state.generation()).toBe(0);
+    expect(state.moveFunction()).toBe(state.officialMove);
   });
 
   it.each(["bullet", "effect"] as const)(
@@ -2560,6 +2635,28 @@ describe("Kinky Dungeon nearby-enemy adapter", () => {
       isNativeFallbackRequest(handler(3, 3, 2, undefined, true, undefined)),
     ).toBe(true);
   });
+
+  it("honors the session cache control before reading nearby map state", () => {
+    const state = fixture();
+    let mapReads = 0;
+    const handler = createKDNearbyEnemiesHandler({
+      ...state.environment,
+      mapData: () => {
+        mapReads += 1;
+        return state.environment.mapData();
+      },
+      compatible: () => {
+        throw new Error("compatibility dependencies must not be read");
+      },
+    });
+
+    const result = withEnemyPositionCacheCompatibilityDisabled(() =>
+      handler(3, 3, 2, undefined, true, undefined),
+    );
+
+    expect(isNativeFallbackRequest(result)).toBe(true);
+    expect(mapReads).toBe(0);
+  });
 });
 
 interface MasterFixtureEnemy extends KDFindMasterEnemy {
@@ -2675,6 +2772,26 @@ describe("Kinky Dungeon implicit-master adapter", () => {
     expect(state.calls.faction).toBe(0);
     expect(state.calls.optimized).toBe(1);
     expect(state.calls.builds).toBe(1);
+  });
+
+  it("honors the session cache control before master helper work", () => {
+    const state = fixture();
+    const handler = createKDFindMasterHandler({
+      ...state.environment,
+      compatible: () => {
+        throw new Error("compatibility dependencies must not be read");
+      },
+    });
+
+    const result = withEnemyPositionCacheCompatibilityDisabled(() =>
+      handler(state.subject),
+    );
+
+    expect(isNativeFallbackRequest(result)).toBe(true);
+    expect(state.calls.rank).toBe(0);
+    expect(state.calls.flags).toBe(0);
+    expect(state.calls.hostile).toBe(0);
+    expect(state.calls.faction).toBe(0);
   });
 
   it("preserves cached coordinate order while filtering rank, hostility, and faction", () => {
