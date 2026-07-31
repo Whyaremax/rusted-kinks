@@ -24,7 +24,7 @@ describe("remembered mod compatibility decisions", () => {
     expect(store.lookup(digestA)).toEqual(remembered);
     expect(store.lookup(digestB)).toBeUndefined();
     expect(
-      createStore(storage, { hybridVersion: "0.1.2" }).lookup(digestA),
+      createStore(storage, { hybridVersion: "0.1.3" }).lookup(digestA),
     ).toBeUndefined();
     expect(
       createStore(storage, { kdVersion: "5.4.93" }).lookup(digestA),
@@ -80,7 +80,7 @@ describe("remembered mod compatibility decisions", () => {
     const context = {
       kdVersion: "5.4.92",
       bundleSha256: bundleA,
-      hybridVersion: "0.1.1",
+      hybridVersion: "0.1.2",
       ruleVersion: 1,
     };
     storage.setItem(
@@ -238,7 +238,7 @@ function createStore(
   return createModCompatibilityDecisionStore(storage, {
     kdVersion: overrides.kdVersion ?? "5.4.92",
     bundleSha256: overrides.bundleSha256 ?? bundleA,
-    hybridVersion: overrides.hybridVersion ?? "0.1.1",
+    hybridVersion: overrides.hybridVersion ?? "0.1.2",
     ruleVersion: overrides.ruleVersion ?? 1,
   });
 }

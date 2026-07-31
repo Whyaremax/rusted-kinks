@@ -11,7 +11,7 @@ describe("KD Hybrid native mod bridge host", () => {
       KDHybridModBridge?: unknown;
     } = {};
     const runtime = {
-      status: vi.fn(() => ({ version: "0.1.1" })),
+      status: vi.fn(() => ({ version: "0.1.2" })),
       setPathfindingMode: vi.fn((mode: "fast" | "quality" | "human") => mode)
     };
     const rendering = {
@@ -31,7 +31,7 @@ describe("KD Hybrid native mod bridge host", () => {
 
     expect(target.KDHybridModBridge).toBe(handle.api);
     expect(handle.api).toEqual({
-      version: "0.1.1",
+      version: "0.1.2",
       status: expect.any(Function),
       applySettings: expect.any(Function)
     });
@@ -65,7 +65,7 @@ describe("KD Hybrid native mod bridge host", () => {
   it("rejects settings outside the supported native contract", () => {
     const handle = installKinkyDungeonModBridgeHost({
       runtime: {
-        status: () => ({ version: "0.1.1" }),
+        status: () => ({ version: "0.1.2" }),
         setPathfindingMode: (mode) => mode
       },
       rendering: {
@@ -100,7 +100,7 @@ describe("KD Hybrid native mod bridge host", () => {
     };
     const handle = installKinkyDungeonModBridgeHost({
       runtime: {
-        status: () => ({ version: "0.1.1" }),
+        status: () => ({ version: "0.1.2" }),
         setPathfindingMode: (mode) => mode
       },
       rendering: {

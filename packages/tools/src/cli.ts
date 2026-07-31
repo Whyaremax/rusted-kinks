@@ -12,7 +12,7 @@ import {
   type PatcherTextureMode
 } from "./patcher.js";
 
-const VERSION = "0.1.1";
+const VERSION = "0.1.2";
 
 export async function main(argv = process.argv.slice(2)): Promise<number> {
   const [command, ...rest] = argv;

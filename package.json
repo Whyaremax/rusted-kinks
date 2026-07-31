@@ -1,6 +1,6 @@
 {
   "name": "kd-hybrid-workspace",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
   "description": "An open-source hybrid Rust/WASM performance layer and compatibility host for Kinky Dungeon.",

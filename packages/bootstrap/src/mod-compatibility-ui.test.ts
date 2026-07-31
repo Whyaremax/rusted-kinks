@@ -597,7 +597,7 @@ function createStore(storage: ModCompatibilityStorage) {
   return createModCompatibilityDecisionStore(storage, {
     kdVersion: "5.4.92",
     bundleSha256: bundle,
-    hybridVersion: "0.1.1",
+    hybridVersion: "0.1.2",
     ruleVersion: 1,
   });
 }

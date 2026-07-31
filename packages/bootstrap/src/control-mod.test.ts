@@ -21,7 +21,7 @@ function fixture(
   const text = new Map<string, string>();
   const applySettings = vi.fn((next) => ({
     available: true as const,
-    version: "0.1.1",
+    version: "0.1.2",
     settings: next,
     activeTextureMode: "mobile" as const,
     restartRequired: next.textureMode !== "mobile",
@@ -31,10 +31,10 @@ function fixture(
     options.native === false
       ? undefined
       : {
-          version: "0.1.1",
+          version: "0.1.2",
           status: () => ({
             available: true,
-            version: "0.1.1",
+            version: "0.1.2",
             settings: {
               pathfindingMode: "fast",
               textureMode: "mobile",
@@ -113,7 +113,7 @@ describe("genuine KD Hybrid control mod", () => {
     ]);
     expect(state.text.get("KDModButtonKDHybrid")).toBe("KD Hybrid");
     expect(state.text.get("KDModButtonnativeStatus")).toContain(
-      "Native bridge v0.1.1 ready",
+      "Native bridge v0.1.2 ready",
     );
     const manager = state.configs.KDHybrid?.find(
       (entry) =>

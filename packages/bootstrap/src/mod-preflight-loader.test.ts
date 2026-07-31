@@ -776,7 +776,7 @@ function remembered(digest: string, choice: ModCompatibilityChoice) {
     context: {
       kdVersion: "5.4.92",
       bundleSha256: digestC,
-      hybridVersion: "0.1.1",
+      hybridVersion: "0.1.2",
       ruleVersion: 1,
     },
     rememberedAt: "2026-07-31T00:00:00.000Z",

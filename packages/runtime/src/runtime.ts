@@ -26,7 +26,7 @@ import type {
 } from "./types.js";
 import { KNOWN_UPSTREAM, UPSTREAM_5_4_92_FACADES } from "./upstream.js";
 
-export const VERSION = "0.1.1";
+export const VERSION = "0.1.2";
 
 export interface RuntimeOptions {
   readonly target?: Record<string, unknown>;

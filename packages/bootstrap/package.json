@@ -1,13 +1,13 @@
 {
   "name": "@kd-hybrid/bootstrap",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "description": "Early, reversible KD Hybrid bootstrap",
   "license": "MIT AND MPL-2.0",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "dependencies": {
-    "@kd-hybrid/runtime": "0.1.1",
+    "@kd-hybrid/runtime": "0.1.2",
     "acorn": "^8.18.0"
   }
 }
