@@ -22,7 +22,19 @@ Change only the installed texture mode later:
 
   .\KDHybrid-Patcher.ps1 -Action Configure -GameRoot "C:\Path\To\Kinky Dungeon" -TextureMode original
 
-Texture-mode changes take effect the next time Kinky Dungeon starts.
+The verified KD 5.4.92 source optimizations are installed by default. Select
+the official source bundle while keeping the KD Hybrid bootstrap and runtime:
+
+  .\KDHybrid-Patcher.ps1 -Action Configure -GameRoot "C:\Path\To\Kinky Dungeon" -SourceMode original
+
+Reapply the exact-build source optimizations later:
+
+  .\KDHybrid-Patcher.ps1 -Action Configure -GameRoot "C:\Path\To\Kinky Dungeon" -SourceMode optimized
+
+`-NoSourceOptimizations` remains an install-time alias for
+`-SourceMode original`. Configure changes only the settings named on that
+command; it does not reset pathfinding, texture, or source selection.
+Configuration changes take effect after Kinky Dungeon is fully restarted.
 
 Check it later:
 
@@ -34,8 +46,15 @@ Remove the bootstrap and restore the backed-up game files:
 
 The patcher refuses unknown game bundles by default. Do not bypass that check
 unless you are developing and have independently verified compatibility.
-The verified KD 5.4.92 source optimization is applied by default. Add
-`-NoSourceOptimizations` to the Install command if you only want the bootstrap.
+
+MANUAL RESOURCE ZIP
+
+The default manual resource ZIP includes the exact-build optimized out/main.js.
+The separately generated source-compatible/original variant deliberately omits
+out/main.js, so copying it onto a clean KD 5.4.92 installation keeps the
+official source bundle. If an optimized manual overlay was already applied,
+restore the official out/main.js first; applying the source-compatible overlay
+alone cannot remove an already copied optimized bundle.
 
 SAVE SAFETY
 

@@ -43,8 +43,14 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
               )
             }
           : {}),
-        sourceOptimizations:
-          options.get("source-optimizations")?.toLowerCase() !== "false"
+        ...(options.has("source-optimizations")
+          ? {
+              sourceOptimizations: requiredBoolean(
+                options,
+                "source-optimizations"
+              )
+            }
+          : {})
       });
       print(result);
       return result.state === "installed" ? 0 : 2;
@@ -64,10 +70,11 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     case "configure": {
       if (
         !options.has("pathfinding-mode") &&
-        !options.has("texture-mode")
+        !options.has("texture-mode") &&
+        !options.has("source-optimizations")
       ) {
         throw new TypeError(
-          "Configure requires --pathfinding-mode and/or --texture-mode"
+          "Configure requires --pathfinding-mode, --texture-mode, and/or --source-optimizations"
         );
       }
       const result = await updateConfiguration(appRoot, {
@@ -84,6 +91,14 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
               textureMode: requiredTextureMode(
                 options,
                 "texture-mode"
+              )
+            }
+          : {}),
+        ...(options.has("source-optimizations")
+          ? {
+              sourceOptimizations: requiredBoolean(
+                options,
+                "source-optimizations"
               )
             }
           : {})
@@ -148,6 +163,17 @@ function requiredTextureMode(
     );
   }
   return value;
+}
+
+function requiredBoolean(
+  options: ReadonlyMap<string, string>,
+  name: string
+): boolean {
+  const value = required(options, name).toLowerCase();
+  if (value !== "true" && value !== "false") {
+    throw new TypeError(`Option --${name} must be true or false`);
+  }
+  return value === "true";
 }
 
 function print(value: unknown): void {

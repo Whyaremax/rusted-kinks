@@ -22,10 +22,16 @@ const root = path.resolve(import.meta.dirname, "..");
 const metadata = JSON.parse(
   await readFile(path.join(root, "package.json"), "utf8"),
 );
+const sourceMode = optionValue("--source-mode") ?? "optimized";
+if (sourceMode !== "optimized" && sourceMode !== "original") {
+  throw new Error(
+    `--source-mode must be optimized or original; found ${sourceMode}`,
+  );
+}
 const appRootInput = normalizeCliPath(optionValue("--app-root"));
 if (!appRootInput) {
   throw new Error(
-    "Usage: npm run package:override -- --app-root <KD game root or resources/app>",
+    "Usage: npm run package:override -- --app-root <KD game root or resources/app> [--source-mode <optimized|original>]",
   );
 }
 
@@ -43,8 +49,9 @@ if (before.bundle !== known.bundleSha256) {
   );
 }
 
-const releaseName =
-  `KD-Hybrid-${metadata.version}-Manual-Resources-KD-5.4.92`;
+const releaseName = sourceMode === "optimized"
+  ? `KD-Hybrid-${metadata.version}-Manual-Resources-KD-5.4.92`
+  : `KD-Hybrid-${metadata.version}-Manual-Resources-KD-5.4.92-Source-Compatible`;
 const output =
   optionValue("--output") ??
   path.join("redistribution", "releases", `${releaseName}.zip`);
@@ -75,19 +82,24 @@ try {
     toolVersion: metadata.version,
     pathfindingMode: "fast",
     textureMode: "auto",
+    sourceOptimizations: sourceMode === "optimized",
   });
-  if (installed.state !== "installed" || !installed.manifest?.sourcePatch) {
+  const installedSourceOptimizations =
+    installed.manifest?.settings?.sourceOptimizations ??
+    (installed.manifest?.sourcePatch !== undefined &&
+      installed.manifest.sourcePatch.enabled !== false);
+  if (
+    installed.state !== "installed" ||
+    installed.manifest?.sourcePatch === undefined ||
+    installedSourceOptimizations !== (sourceMode === "optimized")
+  ) {
     throw new Error(
-      `Staged override did not verify as source-patched: ${installed.state}`,
+      `Staged override did not verify in ${sourceMode} source mode: ${installed.state}`,
     );
   }
 
   await Promise.all([
     cp(path.join(stagedApp, "index.html"), path.join(releaseApp, "index.html")),
-    cp(
-      path.join(stagedApp, "out", "main.js"),
-      path.join(releaseApp, "out", "main.js"),
-    ),
     cp(path.join(stagedApp, "kd-hybrid"), path.join(releaseApp, "kd-hybrid"), {
       recursive: true,
     }),
@@ -96,19 +108,31 @@ try {
       path.join(releaseMods, "KDHybridBridge.zip"),
     ),
   ]);
+  if (sourceMode === "optimized") {
+    await cp(
+      path.join(stagedApp, "out", "main.js"),
+      path.join(releaseApp, "out", "main.js"),
+    );
+  } else if (
+    (await sha256File(path.join(stagedApp, "out", "main.js"))) !== before.bundle
+  ) {
+    throw new Error("Source-compatible staging changed the official source bundle");
+  }
 
   const files = await collectFiles(releaseRoot);
-  await auditOverride(files, releaseRoot, before);
-  const patchedBundleSha256 = await sha256File(
-    path.join(releaseApp, "out", "main.js"),
-  );
-  if (
-    patchedBundleSha256 !==
-    installed.manifest.sourcePatch.patchedSha256
-  ) {
-    throw new Error(
-      `Override bundle hash mismatch: ${patchedBundleSha256}`,
+  await auditOverride(files, releaseRoot, before, sourceMode);
+  if (sourceMode === "optimized") {
+    const patchedBundleSha256 = await sha256File(
+      path.join(releaseApp, "out", "main.js"),
     );
+    if (
+      patchedBundleSha256 !==
+      installed.manifest.sourcePatch.patchedSha256
+    ) {
+      throw new Error(
+        `Override bundle hash mismatch: ${patchedBundleSha256}`,
+      );
+    }
   }
   const archive = {};
   for (const file of files) {
@@ -133,6 +157,7 @@ try {
     `${JSON.stringify(
       {
         state: "ready",
+        sourceMode,
         output: outputPath,
         bytes: (await stat(outputPath)).size,
         sha256: await sha256File(outputPath),
@@ -150,7 +175,12 @@ try {
 
 function optionValue(name) {
   const index = process.argv.indexOf(name);
-  return index >= 0 ? process.argv[index + 1] : undefined;
+  if (index < 0) return undefined;
+  const value = process.argv[index + 1];
+  if (value === undefined || value.startsWith("--")) {
+    throw new Error(`Missing value for ${name}`);
+  }
+  return value;
 }
 
 function normalizeCliPath(value) {
@@ -203,7 +233,12 @@ async function collectFiles(directory) {
   return files;
 }
 
-async function auditOverride(files, releaseRootPath, original) {
+async function auditOverride(
+  files,
+  releaseRootPath,
+  original,
+  selectedSourceMode,
+) {
   const forbiddenExtension =
     /\.(exe|dll|com|msi|ps1|bat|cmd|vbs|sh)$/iu;
   const forbiddenPath =
@@ -225,7 +260,6 @@ async function auditOverride(files, releaseRootPath, original) {
   }
   const required = [
     "resources/app/index.html",
-    "resources/app/out/main.js",
     "resources/app/kd-hybrid/NOTICE.txt",
     "resources/app/kd-hybrid/LICENSES/ACORN-MIT.txt",
     "resources/app/kd-hybrid/LICENSES/MIT.txt",
@@ -233,6 +267,13 @@ async function auditOverride(files, releaseRootPath, original) {
     "resources/app/kd-hybrid/SOURCE.txt",
     "Mods/KDHybridBridge.zip",
   ];
+  if (selectedSourceMode === "optimized") {
+    required.push("resources/app/out/main.js");
+  } else if (relations.includes("resources/app/out/main.js")) {
+    throw new Error(
+      "Source-compatible manual package must omit resources/app/out/main.js",
+    );
+  }
   for (const relative of required) {
     if (!relations.includes(relative)) {
       throw new Error(`Required manual package file is missing: ${relative}`);

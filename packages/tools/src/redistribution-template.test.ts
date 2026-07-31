@@ -25,18 +25,21 @@ const templatePath = join(
 );
 
 describe("PowerShell redistribution template", () => {
-  it("exposes every supported texture mode", async () => {
+  it("exposes every supported texture and source mode", async () => {
     const source = await readFile(templatePath, "utf8");
 
     expect(source).toContain(
       '[ValidateSet("auto", "original", "full", "mobile")]'
     );
+    expect(source).toContain('[ValidateSet("optimized", "original")]');
     expect(source).toContain('"--texture-mode"');
+    expect(source).toContain('"--source-optimizations"');
     expect(source).toContain("$PSBoundParameters.ContainsKey(\"TextureMode\")");
+    expect(source).toContain("$PSBoundParameters.ContainsKey(\"SourceMode\")");
   });
 
   it.skipIf(process.platform !== "win32")(
-    "uses unpacked-kit-relative paths from an arbitrary working directory",
+    "uses kit-relative paths and forwards only explicitly configured settings",
     async () => {
       const root = await mkdtemp(join(tmpdir(), "kd-hybrid-kit-test-"));
       try {
@@ -86,12 +89,12 @@ describe("PowerShell redistribution template", () => {
             "-PathfindingMode",
             "human",
             "-TextureMode",
-            "mobile"
+            "mobile",
+            "-SourceMode",
+            "original"
           ]
         );
-        const install = JSON.parse(
-          await readFile(capturePath, "utf8")
-        ) as CapturedInvocation;
+        const install = await readCapture(capturePath);
         expect(install.cwd).toBe(unrelatedCwd);
         expect(install.argv).toEqual([
           "install",
@@ -106,7 +109,7 @@ describe("PowerShell redistribution template", () => {
           "--texture-mode",
           "mobile",
           "--source-optimizations",
-          "true"
+          "false"
         ]);
 
         runPatcher(
@@ -122,16 +125,71 @@ describe("PowerShell redistribution template", () => {
             "original"
           ]
         );
-        const configure = JSON.parse(
-          await readFile(capturePath, "utf8")
-        ) as CapturedInvocation;
-        expect(configure.argv).toEqual([
+        expect((await readCapture(capturePath)).argv).toEqual([
           "configure",
           "--app-root",
           appRoot,
           "--texture-mode",
           "original"
         ]);
+
+        runPatcher(
+          scriptPath,
+          unrelatedCwd,
+          capturePath,
+          [
+            "-Action",
+            "Configure",
+            "-GameRoot",
+            appRoot,
+            "-SourceMode",
+            "optimized"
+          ]
+        );
+        expect((await readCapture(capturePath)).argv).toEqual([
+          "configure",
+          "--app-root",
+          appRoot,
+          "--source-optimizations",
+          "true"
+        ]);
+
+        runPatcher(
+          scriptPath,
+          unrelatedCwd,
+          capturePath,
+          [
+            "-Action",
+            "Configure",
+            "-GameRoot",
+            appRoot,
+            "-NoSourceOptimizations"
+          ]
+        );
+        expect((await readCapture(capturePath)).argv).toEqual([
+          "configure",
+          "--app-root",
+          appRoot,
+          "--source-optimizations",
+          "false"
+        ]);
+
+        const bareConfigure = runPatcher(
+          scriptPath,
+          unrelatedCwd,
+          capturePath,
+          [
+            "-Action",
+            "Configure",
+            "-GameRoot",
+            appRoot
+          ],
+          false
+        );
+        expect(bareConfigure.status).not.toBe(0);
+        expect(bareConfigure.stderr).toContain(
+          "Configure requires PathfindingMode, TextureMode, or SourceMode"
+        );
       } finally {
         await rm(root, { recursive: true, force: true });
       }
@@ -144,12 +202,17 @@ interface CapturedInvocation {
   readonly cwd: string;
 }
 
+async function readCapture(path: string): Promise<CapturedInvocation> {
+  return JSON.parse(await readFile(path, "utf8")) as CapturedInvocation;
+}
+
 function runPatcher(
   scriptPath: string,
   cwd: string,
   capturePath: string,
-  arguments_: readonly string[]
-): void {
+  arguments_: readonly string[],
+  expectSuccess = true
+): ReturnType<typeof spawnSync> {
   const result = spawnSync(
     "powershell.exe",
     [
@@ -172,5 +235,8 @@ function runPatcher(
   );
 
   expect(result.error).toBeUndefined();
-  expect(result.status, result.stderr || result.stdout).toBe(0);
+  if (expectSuccess) {
+    expect(result.status, result.stderr || result.stdout).toBe(0);
+  }
+  return result;
 }

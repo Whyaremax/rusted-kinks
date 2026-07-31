@@ -57,6 +57,10 @@ describe("reversible patcher", () => {
     expect(await readFile(join(fixture.appRoot, "index.html"), "utf8")).toContain(
       "kd-hybrid/kd-hybrid-bootstrap.js"
     );
+    expect(await readFile(join(fixture.appRoot, "index.html"), "utf8")).toContain(
+      '"sourceOptimizations":false'
+    );
+    expect(first.manifest?.settings?.sourceOptimizations).toBe(false);
     expect(first.manifest?.modBridge).toMatchObject({
       path: "Mods/KDHybridBridge.zip",
       bytes: 4
@@ -269,10 +273,11 @@ describe("reversible patcher", () => {
     for (const mode of ["mobile", "original"] as const) {
       const updated = await updateTextureMode(fixture.appRoot, mode);
       expect(updated.state).toBe("installed");
-      expect(updated.manifest?.settings).toEqual({
-        pathfindingMode: "quality",
-        textureMode: mode
-      });
+    expect(updated.manifest?.settings).toEqual({
+      pathfindingMode: "quality",
+      textureMode: mode,
+      sourceOptimizations: false
+    });
       expect(updated.manifest?.index.backupPath).toBe(backupPath);
       expect(
         await readFile(join(fixture.appRoot, "index.html"), "utf8")
@@ -285,7 +290,8 @@ describe("reversible patcher", () => {
     });
     expect(automatic.manifest?.settings).toEqual({
       pathfindingMode: "fast",
-      textureMode: "auto"
+      textureMode: "auto",
+      sourceOptimizations: false
     });
     const automaticIndex = await readFile(
       join(fixture.appRoot, "index.html"),

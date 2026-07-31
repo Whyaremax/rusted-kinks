@@ -146,6 +146,7 @@ declare global {
         wasmUrl?: string;
         quality?: "high" | "balanced" | "performance" | "auto";
         pathfindingMode?: PathfindingMode;
+        sourceOptimizations?: boolean;
         rendering?: {
           textureMode?: "original" | "full" | "mobile";
           framePacingMode?: "off" | "adaptive";

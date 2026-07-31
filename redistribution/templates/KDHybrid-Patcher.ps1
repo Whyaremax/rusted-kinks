@@ -7,6 +7,8 @@ param(
     [string]$PathfindingMode = "fast",
     [ValidateSet("auto", "original", "full", "mobile")]
     [string]$TextureMode = "auto",
+    [ValidateSet("optimized", "original")]
+    [string]$SourceMode = "optimized",
     [switch]$NoSourceOptimizations
 )
 
@@ -64,6 +66,16 @@ $arguments = @(
     $appRoot
 )
 if ($Action -eq "Install") {
+    $sourceOptimizations = $SourceMode -eq "optimized"
+    if ($NoSourceOptimizations) {
+        if (
+            $PSBoundParameters.ContainsKey("SourceMode") -and
+            $SourceMode -ne "original"
+        ) {
+            throw "-NoSourceOptimizations conflicts with -SourceMode optimized."
+        }
+        $sourceOptimizations = $false
+    }
     $payload = Join-Path $PSScriptRoot "bootstrap"
     if (-not (Test-Path -LiteralPath (Join-Path $payload "version.json") -PathType Leaf)) {
         throw "The redistribution kit is incomplete: bootstrap\version.json is missing."
@@ -78,7 +90,7 @@ if ($Action -eq "Install") {
         "--texture-mode",
         $TextureMode,
         "--source-optimizations",
-        (-not $NoSourceOptimizations).ToString().ToLowerInvariant()
+        $sourceOptimizations.ToString().ToLowerInvariant()
     )
 } elseif ($Action -eq "Configure") {
     $settingsAdded = 0
@@ -96,12 +108,30 @@ if ($Action -eq "Install") {
         )
         $settingsAdded += 1
     }
-    if ($settingsAdded -eq 0) {
-        # Preserve the original wrapper behavior for a bare Configure action.
+    if ($PSBoundParameters.ContainsKey("SourceMode")) {
         $arguments += @(
-            "--pathfinding-mode",
-            $PathfindingMode
+            "--source-optimizations",
+            ($SourceMode -eq "optimized").ToString().ToLowerInvariant()
         )
+        $settingsAdded += 1
+    }
+    if ($NoSourceOptimizations) {
+        if (
+            $PSBoundParameters.ContainsKey("SourceMode") -and
+            $SourceMode -ne "original"
+        ) {
+            throw "-NoSourceOptimizations conflicts with -SourceMode optimized."
+        }
+        if (-not $PSBoundParameters.ContainsKey("SourceMode")) {
+            $arguments += @(
+                "--source-optimizations",
+                "false"
+            )
+            $settingsAdded += 1
+        }
+    }
+    if ($settingsAdded -eq 0) {
+        throw "Configure requires PathfindingMode, TextureMode, or SourceMode."
     }
 }
 

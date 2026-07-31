@@ -13,7 +13,11 @@ import {
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 
 import { sha256Bytes, sha256File } from "./hash.js";
-import { applyKDSourcePatch } from "./kd-source-patches.js";
+import {
+  applyKDSourcePatch,
+  findKDSourcePatch,
+  type KDSourcePatch
+} from "./kd-source-patches.js";
 import { assertExactChild, portablePath, resolveInside } from "./paths.js";
 
 export const KNOWN_BUNDLES = Object.freeze({
@@ -62,6 +66,12 @@ export interface InstallationManifest {
     readonly patchedSha256: string;
     readonly upstreamVersion: string;
     readonly sourceUrl: string;
+    /**
+     * Older manifests omit this field and represent an enabled source patch.
+     * A retained sourcePatch with enabled=false keeps the verified original
+     * backup available while the official bundle is selected.
+     */
+    readonly enabled?: boolean;
   };
   readonly files: readonly InstalledFile[];
   readonly modBridge?: InstalledFile & {
@@ -70,6 +80,7 @@ export interface InstallationManifest {
   readonly settings?: {
     readonly pathfindingMode: PatcherPathfindingMode;
     readonly textureMode?: PatcherTextureMode;
+    readonly sourceOptimizations?: boolean;
   };
 }
 
@@ -120,24 +131,35 @@ export async function install(options: InstallOptions): Promise<PatcherStatus> {
   }
   const existing = await status(appRoot);
   if (existing.state === "installed" && existing.manifest !== null) {
+    let installed = existing;
     if (
-      installationMatchesPayload(
+      !installationMatchesPayload(
         existing.manifest,
         payloadFiles,
         bridgePayload,
         options.toolVersion
       )
     ) {
-      return existing;
+      installed = await upgradeInstalledPayload(
+        appRoot,
+        payloadRoot,
+        payloadFiles,
+        bridgePayload,
+        options.toolVersion,
+        existing.manifest
+      );
     }
-    return upgradeInstalledPayload(
-      appRoot,
-      payloadRoot,
-      payloadFiles,
-      bridgePayload,
-      options.toolVersion,
-      existing.manifest
-    );
+    if (
+      options.sourceOptimizations !== undefined &&
+      installed.manifest !== null &&
+      manifestSourceOptimizationsEnabled(installed.manifest) !==
+        options.sourceOptimizations
+    ) {
+      return updateConfiguration(appRoot, {
+        sourceOptimizations: options.sourceOptimizations
+      });
+    }
+    return installed;
   }
   if (existing.state !== "not-installed") {
     throw new Error(
@@ -166,10 +188,12 @@ export async function install(options: InstallOptions): Promise<PatcherStatus> {
       `Unknown out/main.js SHA-256 ${bundleSha256}; this patcher only accepts verified game builds`
     );
   }
+  const availableSourcePatch = findKDSourcePatch(bundleSha256);
   const sourcePatchResult =
-    options.sourceOptimizations === false
+    options.sourceOptimizations === false || availableSourcePatch === undefined
       ? null
       : applyKDSourcePatch(originalBundle.toString("utf8"), bundleSha256);
+  const sourceOptimizations = sourcePatchResult !== null;
   const patchedBundle =
     sourcePatchResult === null
       ? null
@@ -198,6 +222,7 @@ export async function install(options: InstallOptions): Promise<PatcherStatus> {
     upstreamBundleSha256: bundleSha256,
     quality: "auto",
     pathfindingMode,
+    sourceOptimizations,
     ...(textureMode === "auto"
       ? {}
       : { rendering: { textureMode } })
@@ -224,7 +249,7 @@ export async function install(options: InstallOptions): Promise<PatcherStatus> {
   await ensureAbsent(bridgeModPath);
   await mkdir(dirname(backupPath), { recursive: true });
   await writeFileExclusive(backupPath, originalIndex);
-  if (sourcePatchResult !== null) {
+  if (availableSourcePatch !== undefined) {
     await writeFileExclusive(bundleBackupPath, originalBundle);
   }
 
@@ -255,17 +280,18 @@ export async function install(options: InstallOptions): Promise<PatcherStatus> {
       originalSha256: sha256Bytes(originalIndex),
       patchedSha256: sha256Bytes(patchedIndex)
     },
-    ...(sourcePatchResult === null
+    ...(availableSourcePatch === undefined
       ? {}
       : {
           sourcePatch: {
-            id: sourcePatchResult.patch.id,
+            id: availableSourcePatch.id,
             path: "out/main.js" as const,
             backupPath: portablePath(bundleBackupRelative),
-            originalSha256: sourcePatchResult.patch.inputSha256,
-            patchedSha256: sourcePatchResult.patch.outputSha256,
-            upstreamVersion: sourcePatchResult.patch.upstreamVersion,
-            sourceUrl: sourcePatchResult.patch.sourceUrl
+            originalSha256: availableSourcePatch.inputSha256,
+            patchedSha256: availableSourcePatch.outputSha256,
+            upstreamVersion: availableSourcePatch.upstreamVersion,
+            sourceUrl: availableSourcePatch.sourceUrl,
+            enabled: sourceOptimizations
           }
         }),
     files: installedFiles,
@@ -276,7 +302,8 @@ export async function install(options: InstallOptions): Promise<PatcherStatus> {
     },
     settings: {
       pathfindingMode,
-      textureMode
+      textureMode,
+      sourceOptimizations
     }
   };
 
@@ -322,13 +349,21 @@ export async function updateConfiguration(
   changes: {
     readonly pathfindingMode?: PatcherPathfindingMode;
     readonly textureMode?: PatcherTextureMode;
+    readonly sourceOptimizations?: boolean;
   }
 ): Promise<PatcherStatus> {
   if (
     changes.pathfindingMode === undefined &&
-    changes.textureMode === undefined
+    changes.textureMode === undefined &&
+    changes.sourceOptimizations === undefined
   ) {
     throw new TypeError("At least one KD Hybrid setting is required");
+  }
+  if (
+    changes.sourceOptimizations !== undefined &&
+    typeof changes.sourceOptimizations !== "boolean"
+  ) {
+    throw new TypeError("Source optimizations must be true or false");
   }
   const appRoot = resolve(appRootInput);
   const current = await status(appRoot);
@@ -354,7 +389,27 @@ export async function updateConfiguration(
       current.manifest.settings?.textureMode ??
       readTextureMode(parsed)
   );
+  const currentSourceOptimizations =
+    manifestSourceOptimizationsEnabled(current.manifest);
+  const sourceOptimizations =
+    changes.sourceOptimizations ?? currentSourceOptimizations;
+  const bundlePath = resolveInside(
+    appRoot,
+    current.manifest.upstream.bundlePath
+  );
+  const previousBundle = await readFile(bundlePath);
+  const expectedCurrentBundleSha256 = selectedBundleSha256(current.manifest);
+  if (sha256Bytes(previousBundle) !== expectedCurrentBundleSha256) {
+    throw new Error("out/main.js changed during KD Hybrid settings update");
+  }
+  const sourceSelection = await prepareSourceSelection(
+    appRoot,
+    current.manifest,
+    previousBundle,
+    sourceOptimizations
+  );
   parsed.pathfindingMode = pathfindingMode;
+  parsed.sourceOptimizations = sourceSelection.enabled;
   const rendering =
     typeof parsed.rendering === "object" &&
     parsed.rendering !== null &&
@@ -375,7 +430,7 @@ export async function updateConfiguration(
     `<script>globalThis.KDHybridBootstrapConfig=Object.freeze(` +
     `${escapeInlineJson(parsed)});</script>`;
   const updatedIndex = Buffer.from(indexText.replace(CONFIG_PATTERN, replacement), "utf8");
-  const manifest: InstallationManifest = {
+  const updatedManifestBase: InstallationManifest = {
     ...current.manifest,
     index: {
       ...current.manifest.index,
@@ -383,20 +438,32 @@ export async function updateConfiguration(
     },
     settings: {
       pathfindingMode,
-      textureMode
+      textureMode,
+      sourceOptimizations: sourceSelection.enabled
     }
   };
+  const manifest: InstallationManifest =
+    sourceSelection.sourcePatch === undefined
+      ? updatedManifestBase
+      : {
+          ...updatedManifestBase,
+          sourcePatch: sourceSelection.sourcePatch
+        };
   const manifestPath = resolveInside(appRoot, MANIFEST_PATH);
   const pendingPath = resolveInside(appRoot, PENDING_PATH);
   const previousIndex = Buffer.from(indexText, "utf8");
   const previousManifest = await readFile(manifestPath);
   await atomicWriteJson(pendingPath, manifest);
   try {
+    if (!sourceSelection.bundle.equals(previousBundle)) {
+      await atomicWrite(bundlePath, sourceSelection.bundle);
+    }
     await atomicWrite(indexPath, updatedIndex);
     await atomicWriteJson(manifestPath, manifest);
     await rm(pendingPath, { force: true });
   } catch (error) {
     try {
+      await atomicWrite(bundlePath, previousBundle);
       await atomicWrite(indexPath, previousIndex);
       await atomicWrite(manifestPath, previousManifest);
       await rm(pendingPath, { force: true });
@@ -448,8 +515,23 @@ export async function status(appRootInput: string): Promise<PatcherStatus> {
       problems.push(`${manifest.modBridge.path} was modified`);
     }
   }
-  const expectedBundleSha256 =
-    manifest.sourcePatch?.patchedSha256 ?? manifest.upstream.bundleSha256;
+  if (manifest.sourcePatch !== undefined) {
+    const sourceBackupPath = resolveInside(
+      appRoot,
+      manifest.sourcePatch.backupPath
+    );
+    if (!(await exists(sourceBackupPath))) {
+      problems.push("Original out/main.js backup is missing");
+    } else if (
+      (await sha256File(sourceBackupPath)) !==
+      manifest.sourcePatch.originalSha256
+    ) {
+      problems.push(
+        "Original out/main.js backup hash does not match the manifest"
+      );
+    }
+  }
+  const expectedBundleSha256 = selectedBundleSha256(manifest);
   if (
     (await sha256File(resolveInside(appRoot, manifest.upstream.bundlePath))) !==
     expectedBundleSha256
@@ -498,28 +580,259 @@ export async function uninstall(appRootInput: string): Promise<PatcherStatus> {
   }
 
   if (originalBundle !== null) {
-    await atomicWrite(
-      resolveInside(appRoot, manifest.sourcePatch!.path),
-      originalBundle
-    );
-  }
-  await atomicWrite(resolveInside(appRoot, manifest.index.path), backup);
-  const destinationRoot = resolveInside(appRoot, DESTINATION_DIR);
-  assertExactChild(appRoot, destinationRoot, DESTINATION_DIR);
-  await rm(destinationRoot, { recursive: true, force: true });
-  if (manifest.modBridge !== undefined) {
-    await rm(resolveBridgeModPath(appRoot, manifest.modBridge.path), {
-      force: true
-    });
+    if (sha256Bytes(originalBundle) !== manifest.upstream.bundleSha256) {
+      throw new Error(
+        "Original out/main.js backup does not match the recorded upstream bundle"
+      );
+    }
   }
 
+  const bundlePath = resolveInside(appRoot, manifest.upstream.bundlePath);
+  const indexPath = resolveInside(appRoot, manifest.index.path);
+  const previousBundle = await readFile(bundlePath);
+  const previousIndex = await readFile(indexPath);
+  const manifestPath = resolveInside(appRoot, MANIFEST_PATH);
+  const previousManifest = await readFile(manifestPath);
+  const destinationRoot = resolveInside(appRoot, DESTINATION_DIR);
+  assertExactChild(appRoot, destinationRoot, DESTINATION_DIR);
   const historyPath = resolveInside(
     appRoot,
     `${STATE_DIR}/uninstalled/${manifest.id}/installation.json`
   );
-  await mkdir(dirname(historyPath), { recursive: true });
-  await rename(resolveInside(appRoot, MANIFEST_PATH), historyPath);
+  const stagingRoot = resolveInside(
+    appRoot,
+    `${STATE_DIR}/uninstall-staging/${manifest.id}`
+  );
+  const stagedPayload = resolveInside(
+    appRoot,
+    `${STATE_DIR}/uninstall-staging/${manifest.id}/payload`
+  );
+  const stagedBridge = resolveInside(
+    appRoot,
+    `${STATE_DIR}/uninstall-staging/${manifest.id}/${BRIDGE_MOD_FILE_NAME}`
+  );
+  const bridgeModPath =
+    manifest.modBridge === undefined
+      ? null
+      : resolveBridgeModPath(appRoot, manifest.modBridge.path);
+  await ensureAbsent(historyPath);
+  await ensureAbsent(stagingRoot);
+  const pendingPath = resolveInside(appRoot, PENDING_PATH);
+  await atomicWriteJson(pendingPath, manifest);
+  try {
+    await mkdir(stagingRoot, { recursive: true });
+    await rename(destinationRoot, stagedPayload);
+    if (bridgeModPath !== null) {
+      await rename(bridgeModPath, stagedBridge);
+    }
+    if (originalBundle !== null) {
+      await atomicWrite(bundlePath, originalBundle);
+    }
+    await atomicWrite(indexPath, backup);
+    await mkdir(dirname(historyPath), { recursive: true });
+    await rename(manifestPath, historyPath);
+    await rm(pendingPath, { force: true });
+    try {
+      await rm(stagingRoot, { recursive: true, force: true });
+    } catch {
+      // The committed uninstall remains safe if owned staging cleanup is
+      // delayed by antivirus or another transient file handle.
+    }
+  } catch (error) {
+    try {
+      if (await exists(historyPath)) {
+        await ensureAbsent(manifestPath);
+        await rename(historyPath, manifestPath);
+      } else if (!(await exists(manifestPath))) {
+        await atomicWrite(manifestPath, previousManifest);
+      }
+      await atomicWrite(bundlePath, previousBundle);
+      await atomicWrite(indexPath, previousIndex);
+      if (await exists(stagedPayload)) {
+        await ensureAbsent(destinationRoot);
+        await rename(stagedPayload, destinationRoot);
+      }
+      if (bridgeModPath !== null && (await exists(stagedBridge))) {
+        await ensureAbsent(bridgeModPath);
+        await rename(stagedBridge, bridgeModPath);
+      }
+      await rm(stagingRoot, { recursive: true, force: true });
+      await rm(pendingPath, { force: true });
+    } catch {
+      // Preserve the pending journal when rollback itself cannot finish.
+    }
+    throw error;
+  }
   return status(appRoot);
+}
+
+interface PreparedSourceSelection {
+  readonly enabled: boolean;
+  readonly bundle: Buffer;
+  readonly sourcePatch: InstallationManifest["sourcePatch"];
+}
+
+async function prepareSourceSelection(
+  appRoot: string,
+  manifest: InstallationManifest,
+  currentBundle: Buffer,
+  requestedEnabled: boolean
+): Promise<PreparedSourceSelection> {
+  const currentEnabled = manifestSourceOptimizationsEnabled(manifest);
+  if (requestedEnabled === currentEnabled) {
+    return {
+      enabled: currentEnabled,
+      bundle: currentBundle,
+      sourcePatch:
+        manifest.sourcePatch === undefined
+          ? undefined
+          : {
+              ...manifest.sourcePatch,
+              enabled: currentEnabled
+            }
+    };
+  }
+
+  if (!requestedEnabled) {
+    if (manifest.sourcePatch === undefined) {
+      throw new Error(
+        "Cannot restore the official bundle because no source patch backup is recorded"
+      );
+    }
+    const originalBundle = await readVerifiedSourceBackup(
+      appRoot,
+      manifest.sourcePatch
+    );
+    return {
+      enabled: false,
+      bundle: originalBundle,
+      sourcePatch: {
+        ...manifest.sourcePatch,
+        enabled: false
+      }
+    };
+  }
+
+  const originalSha256 = sha256Bytes(currentBundle);
+  const result = applyKDSourcePatch(
+    currentBundle.toString("utf8"),
+    originalSha256
+  );
+  if (result === null) {
+    throw new Error(
+      `Source optimizations require the exact verified KD 5.4.92 bundle; found ${originalSha256}`
+    );
+  }
+  const patchedBundle = Buffer.from(result.text, "utf8");
+  if (sha256Bytes(patchedBundle) !== result.patch.outputSha256) {
+    throw new Error(
+      `Source patch ${result.patch.id} produced an unexpected bundle hash`
+    );
+  }
+
+  const backupRelative =
+    manifest.sourcePatch?.backupPath ??
+    portablePath(`${STATE_DIR}/backups/${manifest.id}/out-main.js`);
+  if (manifest.sourcePatch !== undefined) {
+    assertSourcePatchMetadata(manifest.sourcePatch, result.patch);
+  }
+  await preserveVerifiedSourceBackup(
+    appRoot,
+    backupRelative,
+    currentBundle,
+    result.patch.inputSha256
+  );
+  return {
+    enabled: true,
+    bundle: patchedBundle,
+    sourcePatch: sourcePatchManifest(
+      result.patch,
+      backupRelative,
+      true
+    )
+  };
+}
+
+function sourcePatchManifest(
+  patch: KDSourcePatch,
+  backupPath: string,
+  enabled: boolean
+): NonNullable<InstallationManifest["sourcePatch"]> {
+  return {
+    id: patch.id,
+    path: "out/main.js",
+    backupPath: portablePath(backupPath),
+    originalSha256: patch.inputSha256,
+    patchedSha256: patch.outputSha256,
+    upstreamVersion: patch.upstreamVersion,
+    sourceUrl: patch.sourceUrl,
+    enabled
+  };
+}
+
+function assertSourcePatchMetadata(
+  manifestPatch: NonNullable<InstallationManifest["sourcePatch"]>,
+  patch: KDSourcePatch
+): void {
+  if (
+    manifestPatch.id !== patch.id ||
+    manifestPatch.path !== "out/main.js" ||
+    manifestPatch.originalSha256 !== patch.inputSha256 ||
+    manifestPatch.patchedSha256 !== patch.outputSha256 ||
+    manifestPatch.upstreamVersion !== patch.upstreamVersion
+  ) {
+    throw new Error(
+      "Installed source patch metadata does not match the verified KD 5.4.92 patch"
+    );
+  }
+}
+
+async function preserveVerifiedSourceBackup(
+  appRoot: string,
+  backupRelative: string,
+  originalBundle: Buffer,
+  expectedSha256: string
+): Promise<void> {
+  const backupPath = resolveInside(appRoot, backupRelative);
+  if (await exists(backupPath)) {
+    const existing = await readFile(backupPath);
+    if (sha256Bytes(existing) !== expectedSha256) {
+      throw new Error(
+        "Refusing to overwrite a mismatched original out/main.js backup"
+      );
+    }
+    return;
+  }
+  await mkdir(dirname(backupPath), { recursive: true });
+  await writeFileExclusive(backupPath, originalBundle);
+  if ((await sha256File(backupPath)) !== expectedSha256) {
+    throw new Error("Original out/main.js backup write did not preserve its hash");
+  }
+}
+
+async function readVerifiedSourceBackup(
+  appRoot: string,
+  sourcePatch: NonNullable<InstallationManifest["sourcePatch"]>
+): Promise<Buffer> {
+  const bundleBackupPath = resolveInside(appRoot, sourcePatch.backupPath);
+  const originalBundle = await readFile(bundleBackupPath);
+  if (sha256Bytes(originalBundle) !== sourcePatch.originalSha256) {
+    throw new Error("Original out/main.js backup hash does not match the manifest");
+  }
+  return originalBundle;
+}
+
+function manifestSourceOptimizationsEnabled(
+  manifest: InstallationManifest
+): boolean {
+  return manifest.sourcePatch !== undefined &&
+    manifest.sourcePatch.enabled !== false;
+}
+
+function selectedBundleSha256(manifest: InstallationManifest): string {
+  return manifestSourceOptimizationsEnabled(manifest)
+    ? manifest.sourcePatch!.patchedSha256
+    : manifest.upstream.bundleSha256;
 }
 
 async function validateLayout(appRoot: string): Promise<void> {
@@ -835,8 +1148,20 @@ async function readManifest(path: string): Promise<InstallationManifest> {
     resolveInside(dirname(dirname(path)), file.path);
   }
   if (parsed.sourcePatch !== undefined) {
+    if (
+      parsed.sourcePatch.enabled !== undefined &&
+      typeof parsed.sourcePatch.enabled !== "boolean"
+    ) {
+      throw new Error("Invalid KD Hybrid source selection in installation manifest");
+    }
     resolveInside(dirname(dirname(path)), parsed.sourcePatch.path);
     resolveInside(dirname(dirname(path)), parsed.sourcePatch.backupPath);
+  }
+  if (
+    parsed.settings?.sourceOptimizations !== undefined &&
+    typeof parsed.settings.sourceOptimizations !== "boolean"
+  ) {
+    throw new Error("Invalid KD Hybrid source setting in installation manifest");
   }
   if (parsed.modBridge !== undefined) {
     if (
