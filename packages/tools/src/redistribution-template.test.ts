@@ -4,6 +4,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  realpath,
   rm,
   writeFile,
 } from "node:fs/promises";
@@ -89,9 +90,7 @@ describe("PowerShell redistribution template", () => {
           "-SourceMode",
           "original",
         ]);
-        const install = await readCapture(capturePath);
-        expect(install.cwd).toBe(unrelatedCwd);
-        expect(install.argv).toEqual([
+        await expectCapture(capturePath, unrelatedCwd, [
           "install",
           "--app-root",
           appRoot,
@@ -115,7 +114,7 @@ describe("PowerShell redistribution template", () => {
           "-TextureMode",
           "original",
         ]);
-        expect((await readCapture(capturePath)).argv).toEqual([
+        await expectCapture(capturePath, unrelatedCwd, [
           "configure",
           "--app-root",
           appRoot,
@@ -131,7 +130,7 @@ describe("PowerShell redistribution template", () => {
           "-SourceMode",
           "optimized",
         ]);
-        expect((await readCapture(capturePath)).argv).toEqual([
+        await expectCapture(capturePath, unrelatedCwd, [
           "configure",
           "--app-root",
           appRoot,
@@ -146,7 +145,7 @@ describe("PowerShell redistribution template", () => {
           appRoot,
           "-NoSourceOptimizations",
         ]);
-        expect((await readCapture(capturePath)).argv).toEqual([
+        await expectCapture(capturePath, unrelatedCwd, [
           "configure",
           "--app-root",
           appRoot,
@@ -180,6 +179,36 @@ interface CapturedInvocation {
 
 async function readCapture(path: string): Promise<CapturedInvocation> {
   return JSON.parse(await readFile(path, "utf8")) as CapturedInvocation;
+}
+
+async function expectCapture(
+  capturePath: string,
+  cwd: string,
+  argv: readonly string[],
+): Promise<void> {
+  expect(await canonicalInvocation(await readCapture(capturePath))).toEqual(
+    await canonicalInvocation({ argv: [...argv], cwd }),
+  );
+}
+
+async function canonicalInvocation(
+  invocation: CapturedInvocation,
+): Promise<CapturedInvocation> {
+  const argv = [...invocation.argv];
+  for (let index = 1; index < argv.length; index += 1) {
+    if (argv[index - 1] === "--app-root" || argv[index - 1] === "--payload") {
+      argv[index] = await canonicalPath(argv[index]);
+    }
+  }
+  return {
+    argv,
+    cwd: await canonicalPath(invocation.cwd),
+  };
+}
+
+async function canonicalPath(value: string): Promise<string> {
+  const canonical = await realpath(value);
+  return process.platform === "win32" ? canonical.toLowerCase() : canonical;
 }
 
 function runPatcher(
