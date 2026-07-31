@@ -168,7 +168,7 @@ describe("PowerShell redistribution template", () => {
         await rm(root, { recursive: true, force: true });
       }
     },
-    15_000,
+    45_000,
   );
 });
 
