@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   drainModPreflightBeforeTeardown,
   settleNativeAdapterRegistrations,
+  shouldInstallKDNearestPlayerAdapter,
 } from "./index.js";
 
 describe("mod preflight teardown barrier", () => {
@@ -102,5 +103,19 @@ describe("native adapter registration barrier", () => {
     ).rejects.toBe(failure);
     expect(rejectSynchronously).toHaveBeenCalledOnce();
     expect(sibling).toHaveBeenCalledOnce();
+  });
+});
+
+describe("nearest-player source selection", () => {
+  it("does not depend on source-marker timing when optimized source is explicit", () => {
+    expect(shouldInstallKDNearestPlayerAdapter(true, false)).toBe(false);
+    expect(shouldInstallKDNearestPlayerAdapter(true, true)).toBe(false);
+  });
+
+  it("uses the runtime adapter only when neither source signal is present", () => {
+    expect(shouldInstallKDNearestPlayerAdapter(false, false)).toBe(true);
+    expect(shouldInstallKDNearestPlayerAdapter(undefined, false)).toBe(true);
+    expect(shouldInstallKDNearestPlayerAdapter(false, true)).toBe(false);
+    expect(shouldInstallKDNearestPlayerAdapter(undefined, true)).toBe(false);
   });
 });

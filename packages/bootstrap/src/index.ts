@@ -168,9 +168,12 @@ export function installBootstrap(): BootstrapHandle {
           () => waitForKDFindMasterAdapter(runtime),
           () => waitForKDJailKeyEarlyReturnAdapter(runtime),
           () => waitForKDEnemyUpdateCacheAdapter(runtime),
-          ...(hasKDNearestPlayerSourcePatch()
-            ? []
-            : [() => waitForKDNearestPlayerAdapter(runtime)]),
+          ...(shouldInstallKDNearestPlayerAdapter(
+            config?.sourceOptimizations,
+            hasKDNearestPlayerSourcePatch(),
+          )
+            ? [() => waitForKDNearestPlayerAdapter(runtime)]
+            : []),
         ]);
       }
       return ready;
@@ -268,6 +271,20 @@ export async function settleNativeAdapterRegistrations(
   if (failure !== undefined) {
     throw failure.reason;
   }
+}
+
+/**
+ * The bootstrap runs before KD's main bundle, so the source-patch marker can
+ * appear on either side of native initialization. An explicit optimized-source
+ * selection must win that race and suppress the redundant runtime adapter.
+ *
+ * @internal
+ */
+export function shouldInstallKDNearestPlayerAdapter(
+  sourceOptimizations: boolean | undefined,
+  sourcePatchPresent: boolean,
+): boolean {
+  return sourceOptimizations !== true && !sourcePatchPresent;
 }
 
 function createBrowserCompatibilityDecisionStore(
