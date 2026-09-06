@@ -189,3 +189,7 @@ community performance/modding project and does not bundle the game.
 
 See [NOTICE.md](NOTICE.md), [LICENSE](LICENSE), and
 [LICENSES/MPL-2.0.txt](LICENSES/MPL-2.0.txt) for the exact split.
+
+## Optional low-power and community compatibility add-ons
+
+The [supplemental release](https://github.com/Whyaremax/rusted-kinks/releases/tag/v0.1.3) adds [30/20 FPS low-power mode](docs/LOW_POWER.md) and [repairs for four community mods](docs/COMMUNITY_MOD_REPAIRS.md) on KD 5.4.92. The core installer remains v0.1.2; these are separate downloads.

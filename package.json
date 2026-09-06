@@ -45,7 +45,9 @@
     "test:remote:smoke": "node scripts/smoke-remote-test-server.mjs",
     "test:remote:browser": "node scripts/smoke-remote-browser.mjs",
     "test:remote:firefox": "node scripts/smoke-remote-firefox.mjs",
-    "test:mod-sdk": "node scripts/test-mod-sdk.mjs"
+    "test:mod-sdk": "node scripts/test-mod-sdk.mjs",
+    "package:low-power": "node scripts/package-low-power.mjs",
+    "package:community-repairs": "node scripts/package-community-repairs.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
