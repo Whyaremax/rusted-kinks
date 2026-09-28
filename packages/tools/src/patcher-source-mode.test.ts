@@ -198,6 +198,44 @@ describe("source optimization selection", () => {
     expect(await bundleText(fixture.appRoot)).toBe(patchFixture.optimized);
   });
 
+  it("replaces an older exact source patch when Install is rerun", async () => {
+    const fixture = await createFixture();
+    const oldInstall = await installFixture(fixture);
+    const manifestPath = installationManifestPath(fixture.appRoot);
+    const oldManifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
+      toolVersion: string;
+      sourcePatch: { id: string };
+    };
+    oldManifest.toolVersion = "old";
+    oldManifest.sourcePatch.id = "kd-5.4.92-source-optimizations-v5";
+    await writeFile(manifestPath, `${JSON.stringify(oldManifest, null, 2)}\n`);
+    expect((await status(fixture.appRoot)).state).toBe("installed");
+
+    const upgraded = await install({
+      appRoot: fixture.appRoot,
+      payloadRoot: fixture.payloadRoot,
+      toolVersion: "new",
+      allowUnknownBundle: true,
+      sourceOptimizations: true,
+      pathfindingMode: "fast",
+      textureMode: "auto"
+    });
+    expect(upgraded.state).toBe("installed");
+    expect(upgraded.manifest?.id).not.toBe(oldInstall.manifest?.id);
+    expect(upgraded.manifest?.sourcePatch?.id).toBe(patchFixture.patch.id);
+    expect(upgraded.manifest?.toolVersion).toBe("new");
+    expect(upgraded.manifest?.settings).toEqual({
+      pathfindingMode: "quality",
+      textureMode: "full",
+      sourceOptimizations: true
+    });
+    expect(await bundleText(fixture.appRoot)).toBe(patchFixture.optimized);
+    expect(await readFile(fixture.saveSentinel, "utf8")).toBe("do-not-touch");
+
+    expect((await uninstall(fixture.appRoot)).state).toBe("not-installed");
+    expect(await bundleText(fixture.appRoot)).toBe(patchFixture.original);
+  });
+
   it("uninstalls to byte-exact official source from either selected state", async () => {
     for (const enabled of [true, false]) {
       const fixture = await createFixture();

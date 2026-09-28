@@ -1,6 +1,6 @@
 {
   "name": "@kd-hybrid/tools",
-  "version": "0.1.4-rc.1",
+  "version": "0.1.4-rc.2",
   "type": "module",
   "description": "Reversible KD Hybrid patcher and distribution packager",
   "license": "MIT",

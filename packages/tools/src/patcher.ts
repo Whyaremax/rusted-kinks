@@ -131,6 +131,45 @@ export async function install(options: InstallOptions): Promise<PatcherStatus> {
   }
   const existing = await status(appRoot);
   if (existing.state === "installed" && existing.manifest !== null) {
+    const installedPatch = existing.manifest.sourcePatch;
+    if (installedPatch !== undefined) {
+      const replacementPatch = findKDSourcePatch(installedPatch.originalSha256);
+      if (replacementPatch === undefined) {
+        throw new Error(
+          `Cannot upgrade source patch ${installedPatch.id}: this kit does not support its original game bundle`
+        );
+      }
+      if (
+        installedPatch.id !== replacementPatch.id ||
+        installedPatch.patchedSha256 !== replacementPatch.outputSha256
+      ) {
+        // The payload-only upgrade cannot replace out/main.js. Verify the
+        // original backup and the new exact patch before removing the old kit.
+        const originalBundle = await readVerifiedSourceBackup(appRoot, installedPatch);
+        const replacement = applyKDSourcePatch(
+          originalBundle.toString("utf8"),
+          installedPatch.originalSha256
+        );
+        if (
+          replacement === null ||
+          replacement.patch.id !== replacementPatch.id ||
+          sha256Bytes(Buffer.from(replacement.text, "utf8")) !== replacementPatch.outputSha256
+        ) {
+          throw new Error(`Cannot verify replacement for source patch ${installedPatch.id}`);
+        }
+        const preservedSettings = existing.manifest.settings;
+        await uninstall(appRoot);
+        return install({
+          ...options,
+          sourceOptimizations:
+            options.sourceOptimizations ?? manifestSourceOptimizationsEnabled(existing.manifest),
+          ...(preservedSettings === undefined ? {} : {
+            pathfindingMode: preservedSettings.pathfindingMode,
+            textureMode: preservedSettings.textureMode
+          })
+        });
+      }
+    }
     let installed = existing;
     if (
       !installationMatchesPayload(

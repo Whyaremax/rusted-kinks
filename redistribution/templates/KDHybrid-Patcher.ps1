@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidateSet("Install", "Status", "Configure", "Uninstall")]
-    [string]$Action = "Status",
+    [string]$Action = "Install",
     [string]$GameRoot,
     [ValidateSet("quality", "fast", "human")]
     [string]$PathfindingMode = "fast",
@@ -13,9 +13,18 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$startedWithoutArguments = $PSBoundParameters.Count -eq 0
+
+trap {
+    Write-Host "Patch failed: $($_.Exception.Message)" -ForegroundColor Red
+    if ($startedWithoutArguments) {
+        [void](Read-Host "Press Enter to close")
+    }
+    exit 1
+}
 
 if ([string]::IsNullOrWhiteSpace($GameRoot)) {
-    $GameRoot = Read-Host "Path to your Kinky Dungeon installation"
+    $GameRoot = Read-Host "Path to your Kinky Dungeon game folder"
 }
 if ([string]::IsNullOrWhiteSpace($GameRoot)) {
     throw "GameRoot is required."
@@ -140,4 +149,8 @@ Write-Host "Application root: $appRoot"
 & $nodeCommand.Source @arguments
 if ($LASTEXITCODE -ne 0) {
     throw "KD Hybrid $Action failed with exit code $LASTEXITCODE."
+}
+if ($startedWithoutArguments) {
+    Write-Host "Done. You can start Kinky Dungeon now."
+    [void](Read-Host "Press Enter to close")
 }

@@ -35,6 +35,7 @@ describe("PowerShell redistribution template", () => {
     expect(source).toContain('[ValidateSet("optimized", "original")]');
     expect(source).toContain('"--texture-mode"');
     expect(source).toContain('"--source-optimizations"');
+    expect(source).toContain('[string]$Action = "Install"');
     expect(source).toContain('$PSBoundParameters.ContainsKey("TextureMode")');
     expect(source).toContain('$PSBoundParameters.ContainsKey("SourceMode")');
   });
@@ -107,6 +108,51 @@ describe("PowerShell redistribution template", () => {
         ]);
 
         runPatcher(scriptPath, unrelatedCwd, capturePath, [
+          "-GameRoot",
+          gameRoot,
+        ]);
+        await expectCapture(capturePath, unrelatedCwd, [
+          "install",
+          "--app-root",
+          appRoot,
+          "--payload",
+          join(kitRoot, "bootstrap"),
+          "--upstream-version",
+          "5.4.92",
+          "--pathfinding-mode",
+          "fast",
+          "--texture-mode",
+          "auto",
+          "--source-optimizations",
+          "true",
+        ]);
+
+        const prompted = runPatcher(
+          scriptPath,
+          unrelatedCwd,
+          capturePath,
+          [],
+          true,
+          `${gameRoot}\n\n`,
+        );
+        expect(prompted.stdout).toContain("Done. You can start Kinky Dungeon now.");
+        await expectCapture(capturePath, unrelatedCwd, [
+          "install",
+          "--app-root",
+          appRoot,
+          "--payload",
+          join(kitRoot, "bootstrap"),
+          "--upstream-version",
+          "5.4.92",
+          "--pathfinding-mode",
+          "fast",
+          "--texture-mode",
+          "auto",
+          "--source-optimizations",
+          "true",
+        ]);
+
+        runPatcher(scriptPath, unrelatedCwd, capturePath, [
           "-Action",
           "Configure",
           "-GameRoot",
@@ -161,7 +207,7 @@ describe("PowerShell redistribution template", () => {
           false,
         );
         expect(bareConfigure.status).not.toBe(0);
-        expect(bareConfigure.stderr).toContain(
+        expect(`${bareConfigure.stdout}\n${bareConfigure.stderr}`).toContain(
           "Configure requires PathfindingMode, TextureMode, or SourceMode",
         );
       } finally {
@@ -217,6 +263,7 @@ function runPatcher(
   capturePath: string,
   arguments_: readonly string[],
   expectSuccess = true,
+  input?: string,
 ): ReturnType<typeof spawnSync> {
   const result = spawnSync(
     "powershell.exe",
@@ -231,6 +278,7 @@ function runPatcher(
     {
       cwd,
       encoding: "utf8",
+      ...(input === undefined ? {} : { input }),
       env: {
         ...process.env,
         KD_HYBRID_CAPTURE_PATH: capturePath,
