@@ -13,18 +13,18 @@
 
 namespace {
 
-constexpr auto kPatchId = "kd-5.4.92-source-optimizations-v6";
+constexpr auto kPatchId = "kd-5.4.92-source-optimizations-v11";
 constexpr auto kUpstreamVersion = "5.4.92";
 constexpr auto kInputSha256 =
     "2d3041a085cbe475a63227ff40709f6d9c1595c77a58545c69edf359a57605a4";
 constexpr auto kOutputSha256 =
-    "aa4c09e73de34b1ab6eea5328880049578963c7c3dcbaae07728ca408da59f92";
+    "6bcc1b1de30441efbc1e08b9caccb692c6a4fd1aad998c2affbb9b35e94f17d0";
 constexpr auto kSourceUrl =
     "https://github.com/Ada18980/KinkiestDungeon/tree/"
     "5c96c4c1e67faf136ba2c167ed889a9e29005a18";
 constexpr auto kPatchResource =
     ":/bootstrap/source/MPL-2.0/upstream-patches/kd-5.4.92/"
-    "bundle-optimizations-v6.patch";
+    "bundle-optimizations-v11.patch";
 
 QString sha256(const QByteArray& bytes)
 {

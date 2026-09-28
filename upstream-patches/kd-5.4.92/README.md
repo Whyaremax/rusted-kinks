@@ -17,10 +17,14 @@ Two patches are included:
 
 - `source-optimizations-v6.patch` contains the human-readable TypeScript
   changes maintained in the exact upstream source checkout.
-- `bundle-optimizations-v6.patch` is the authoritative, byte-exact and
+- `bundle-optimizations-v11.patch` is the authoritative, byte-exact and
   human-readable JavaScript delta used by the installers for the official
   `out/main.js`. It also contains later accepted slices developed and tested
   directly against that shipped bundle.
+
+The TypeScript source patch remains a maintained subset of the bundle-only
+changes; it does not yet reproduce the complete v11 output when rebuilt.
+The v6 bundle patch is retained for review of the previous release.
 
 The accepted changes cover guarded map-generation pathfinding, enemy
 selection, restraint selection, nearest-target, helpless-state, buff-event,
@@ -44,12 +48,15 @@ TypeScript build. The installer therefore does not accept an arbitrary local
 build. Applying the authoritative bundle patch to the official input produces
 SHA-256:
 
-`aa4c09e73de34b1ab6eea5328880049578963c7c3dcbaae07728ca408da59f92`
+`6bcc1b1de30441efbc1e08b9caccb692c6a4fd1aad998c2affbb9b35e94f17d0`
 
-The normal Rusted Kinks installer applies `bundle-optimizations-v6.patch` only
+The normal Rusted Kinks installer applies `bundle-optimizations-v11.patch` only
 when the input hash matches the official bundle above, verifies the output
 hash, and keeps the original bundle in its private backup. Uninstall restores
 the exact original bytes.
+
+The v11 experimental magic-event shortcut is off by default. This prerelease
+does not expose a toggle for it in the mod bridge.
 
 Kinky Dungeon is credited to Strait Laced Games LLC and its contributors.
 These patches and the adapted files they modify are MPL-2.0-covered; the rest

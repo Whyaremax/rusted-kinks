@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(KDHybridManager VERSION 0.1.2 LANGUAGES CXX)
+project(KDHybridManager VERSION 0.1.4 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -26,11 +26,13 @@ set(KD_BOOTSTRAP_FILES
     "${KD_BOOTSTRAP_ROOT}/source/MPL-2.0/packages/bootstrap/src/kd-adapters.ts"
     "${KD_BOOTSTRAP_ROOT}/source/MPL-2.0/packages/tools/src/kd-source-patches.ts"
     "${KD_BOOTSTRAP_ROOT}/source/MPL-2.0/packages/tools/src/kd-source-patch-v6.ts"
+    "${KD_BOOTSTRAP_ROOT}/source/MPL-2.0/packages/tools/src/kd-source-patch-v11.ts"
     "${KD_BOOTSTRAP_ROOT}/source/MPL-2.0/native/manager/src/SourcePatches.h"
     "${KD_BOOTSTRAP_ROOT}/source/MPL-2.0/native/manager/src/SourcePatches.cpp"
     "${KD_BOOTSTRAP_ROOT}/source/MPL-2.0/upstream-patches/kd-5.4.92/README.md"
     "${KD_BOOTSTRAP_ROOT}/source/MPL-2.0/upstream-patches/kd-5.4.92/source-optimizations-v6.patch"
     "${KD_BOOTSTRAP_ROOT}/source/MPL-2.0/upstream-patches/kd-5.4.92/bundle-optimizations-v6.patch"
+    "${KD_BOOTSTRAP_ROOT}/source/MPL-2.0/upstream-patches/kd-5.4.92/bundle-optimizations-v11.patch"
     "${KD_BOOTSTRAP_ROOT}/wasm/kd_hybrid_core.js"
     "${KD_BOOTSTRAP_ROOT}/wasm/kd_hybrid_core_bg.wasm"
 )

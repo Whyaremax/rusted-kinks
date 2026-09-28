@@ -147,6 +147,10 @@ const legalFiles = [
     "source/MPL-2.0/packages/tools/src/kd-source-patch-v6.ts"
   ],
   [
+    "packages/tools/src/kd-source-patch-v11.ts",
+    "source/MPL-2.0/packages/tools/src/kd-source-patch-v11.ts"
+  ],
+  [
     "native/manager/src/SourcePatches.h",
     "source/MPL-2.0/native/manager/src/SourcePatches.h"
   ],
@@ -165,6 +169,10 @@ const legalFiles = [
   [
     "upstream-patches/kd-5.4.92/bundle-optimizations-v6.patch",
     "source/MPL-2.0/upstream-patches/kd-5.4.92/bundle-optimizations-v6.patch"
+  ],
+  [
+    "upstream-patches/kd-5.4.92/bundle-optimizations-v11.patch",
+    "source/MPL-2.0/upstream-patches/kd-5.4.92/bundle-optimizations-v11.patch"
   ]
 ];
 
@@ -204,13 +212,13 @@ await writeFile(
           "2d3041a085cbe475a63227ff40709f6d9c1595c77a58545c69edf359a57605a4"
       },
       sourcePatch: {
-        id: "kd-5.4.92-source-optimizations-v6",
+        id: "kd-5.4.92-source-optimizations-v11",
         outputBundleSha256:
-          "aa4c09e73de34b1ab6eea5328880049578963c7c3dcbaae07728ca408da59f92",
+          "6bcc1b1de30441efbc1e08b9caccb692c6a4fd1aad998c2affbb9b35e94f17d0",
         source:
           "source/MPL-2.0/upstream-patches/kd-5.4.92/source-optimizations-v6.patch",
         bundlePatch:
-          "source/MPL-2.0/upstream-patches/kd-5.4.92/bundle-optimizations-v6.patch"
+          "source/MPL-2.0/upstream-patches/kd-5.4.92/bundle-optimizations-v11.patch"
       }
     },
     null,

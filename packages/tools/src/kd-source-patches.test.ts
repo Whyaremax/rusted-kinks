@@ -14,11 +14,11 @@ const KD_5_4_92_SHA256 =
 describe("KD source patch", () => {
   it("exposes only immutable attribution metadata", () => {
     expect(findKDSourcePatch(KD_5_4_92_SHA256)).toEqual({
-      id: "kd-5.4.92-source-optimizations-v6",
+      id: "kd-5.4.92-source-optimizations-v11",
       upstreamVersion: "5.4.92",
       inputSha256: KD_5_4_92_SHA256,
       outputSha256:
-        "aa4c09e73de34b1ab6eea5328880049578963c7c3dcbaae07728ca408da59f92",
+        "6bcc1b1de30441efbc1e08b9caccb692c6a4fd1aad998c2affbb9b35e94f17d0",
       sourceUrl:
         "https://github.com/Ada18980/KinkiestDungeon/tree/5c96c4c1e67faf136ba2c167ed889a9e29005a18",
     });

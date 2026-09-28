@@ -3,7 +3,7 @@
 // Exact, version-gated transformations adapted from Kinky Dungeon 5.4.92.
 // Kinky Dungeon is Copyright Strait Laced Games LLC.
 
-import { KD_5_4_92_SOURCE_OPTIMIZATIONS_V6_BASE64 } from "./kd-source-patch-v6.js";
+import { KD_5_4_92_SOURCE_OPTIMIZATIONS_V11_BASE64 } from "./kd-source-patch-v11.js";
 
 export interface KDSourcePatch {
   readonly id: string;
@@ -23,16 +23,16 @@ interface TextLine {
 }
 
 const KD_5_4_92_SOURCE_OPTIMIZATIONS = Object.freeze({
-  id: "kd-5.4.92-source-optimizations-v6",
+  id: "kd-5.4.92-source-optimizations-v11",
   upstreamVersion: "5.4.92",
   inputSha256:
     "2d3041a085cbe475a63227ff40709f6d9c1595c77a58545c69edf359a57605a4",
   outputSha256:
-    "aa4c09e73de34b1ab6eea5328880049578963c7c3dcbaae07728ca408da59f92",
+    "6bcc1b1de30441efbc1e08b9caccb692c6a4fd1aad998c2affbb9b35e94f17d0",
   sourceUrl:
     "https://github.com/Ada18980/KinkiestDungeon/tree/5c96c4c1e67faf136ba2c167ed889a9e29005a18",
   unifiedPatch: Buffer.from(
-    KD_5_4_92_SOURCE_OPTIMIZATIONS_V6_BASE64,
+    KD_5_4_92_SOURCE_OPTIMIZATIONS_V11_BASE64,
     "base64",
   ).toString("utf8"),
 }) satisfies KDSourcePatchDefinition;
