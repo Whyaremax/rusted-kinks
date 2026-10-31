@@ -1,58 +1,43 @@
 # KD 5.4.92 source and bundle patches
 
 This directory holds the MPL-covered Rusted Kinks changes against Kinky
-Dungeon 5.4.92. It does not contain the game, its assets, saves, or a copy of
-the upstream source tree.
+Dungeon 5.4.92. It contains no game assets, saves, or full upstream source
+tree.
 
-Upstream:
+Upstream identity:
 
 - repository: <https://github.com/Ada18980/KinkiestDungeon>
-- exact commit: `5c96c4c1e67faf136ba2c167ed889a9e29005a18`
-- branch name: `5.4.90`
+- commit: `5c96c4c1e67faf136ba2c167ed889a9e29005a18`
+- branch: `5.4.90`
 - in-game version: `5.4.92`
 - clean `out/main.js` SHA-256:
   `2d3041a085cbe475a63227ff40709f6d9c1595c77a58545c69edf359a57605a4`
 
-Two patches are included:
+The active release uses `source-optimizations-v7.patch` for review and
+`bundle-optimizations-v7.patch` for the byte-exact installed transformation.
+It produces `out/main.js` SHA-256:
 
-- `source-optimizations-v6.patch` contains the human-readable TypeScript
-  changes maintained in the exact upstream source checkout.
-- `bundle-optimizations-v6.patch` is the authoritative, byte-exact and
-  human-readable JavaScript delta used by the installers for the official
-  `out/main.js`. It also contains later accepted slices developed and tested
-  directly against that shipped bundle.
+`aa92bb52a07a553086525704f3b1ee8f3a7f2fe6e008cd507f74c9cde9c57b3d`
 
-The accepted changes cover guarded map-generation pathfinding, enemy
-selection, restraint selection, nearest-target, helpless-state, buff-event,
-and path-cache hot paths. Every fast path is version- and dependency-gated;
-unsupported inputs and changed mod-facing helpers return to the original KD
-logic.
+Version 7 retains the guarded hot-path work from version 6 and adds the
+accepted atlas-loading, first-use, Pixi 7, and console-clean compatibility
+changes. The installer also applies the shared MIT-covered pixi-filters 5.2.0
+compatibility patch to `Scripts/lib/pixi-filters.js`; distributable review
+source is under `source/MIT/upstream-patches/`.
 
-To inspect or build the TypeScript-maintained portion:
+The version 6 source and bundle patches remain here only so installed legacy
+manifests stay reviewable and migratable. New installs select version 7.
+
+To inspect the source delta:
 
 ```powershell
 git clone https://github.com/Ada18980/KinkiestDungeon.git
 cd KinkiestDungeon
 git checkout 5c96c4c1e67faf136ba2c167ed889a9e29005a18
-git apply C:\path\to\rusted-kinks\upstream-patches\kd-5.4.92\source-optimizations-v6.patch
-npm ci
-npm run build
+git apply C:\path\to\rusted-kinks\upstream-patches\kd-5.4.92\source-optimizations-v7.patch
 ```
 
-Compiler versions and line-ending policy can change the bytes emitted by the
-TypeScript build. The installer therefore does not accept an arbitrary local
-build. Applying the authoritative bundle patch to the official input produces
-SHA-256:
-
-`aa4c09e73de34b1ab6eea5328880049578963c7c3dcbaae07728ca408da59f92`
-
-The normal Rusted Kinks installer applies `bundle-optimizations-v6.patch` only
-when the input hash matches the official bundle above, verifies the output
-hash, and keeps the original bundle in its private backup. Uninstall restores
-the exact original bytes.
-
-Kinky Dungeon is credited to Strait Laced Games LLC and its contributors.
-These patches and the adapted files they modify are MPL-2.0-covered; the rest
-of Rusted Kinks remains MIT unless a file says otherwise. The upstream
-repository's own contribution and redistribution terms still apply to the
-game and its source.
+The installer accepts only the exact clean hashes, verifies every output, and
+keeps byte-exact private backups for uninstall. Kinky Dungeon is credited to
+Strait Laced Games LLC and its contributors. These KD patches are MPL-2.0;
+upstream terms remain authoritative.

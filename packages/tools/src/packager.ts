@@ -15,10 +15,16 @@ const MAX_FILE_BYTES = 64 * 1024 * 1024;
 const MAX_ARCHIVE_INPUT_BYTES = 128 * 1024 * 1024;
 const ZIP_MTIME = new Date(1980, 0, 1, 0, 0, 0);
 const REQUIRED_PAYLOAD_FILES = [
+  "source/MPL-2.0/packages/tools/src/kd-source-patch-5-5-6-v2.ts",
+  "source/MPL-2.0/upstream-patches/kd-5.5.6/bundle-optimizations-v2.patch",
+  "source/MPL-2.0/packages/tools/src/kd-source-patch-5-5-6-v1.ts",
+  "source/MPL-2.0/upstream-patches/kd-5.5.6/README.md",
+  "source/MPL-2.0/upstream-patches/kd-5.5.6/bundle-optimizations-v1.patch",
   "KDHybrid.js",
   "wasm/kd_hybrid_core_bg.wasm",
   "LICENSES/ACORN-MIT.txt",
   "LICENSES/MIT.txt",
+  "LICENSES/PIXI-FILTERS-MIT.txt",
   "LICENSES/MPL-2.0.txt",
   "NOTICE.txt",
   "SOURCE.txt",
@@ -26,11 +32,21 @@ const REQUIRED_PAYLOAD_FILES = [
   "source/MPL-2.0/crates/kd-core/src/pathfinding.rs",
   "source/MPL-2.0/packages/tools/src/kd-source-patches.ts",
   "source/MPL-2.0/packages/tools/src/kd-source-patch-v6.ts",
+  "source/MPL-2.0/packages/tools/src/kd-source-patch-v7.ts",
+  "source/MPL-2.0/packages/tools/src/kd-source-patch-5-5-v1.ts",
   "source/MPL-2.0/native/manager/src/SourcePatches.h",
   "source/MPL-2.0/native/manager/src/SourcePatches.cpp",
   "source/MPL-2.0/upstream-patches/kd-5.4.92/README.md",
   "source/MPL-2.0/upstream-patches/kd-5.4.92/source-optimizations-v6.patch",
-  "source/MPL-2.0/upstream-patches/kd-5.4.92/bundle-optimizations-v6.patch"
+  "source/MPL-2.0/upstream-patches/kd-5.4.92/bundle-optimizations-v6.patch",
+  "source/MPL-2.0/upstream-patches/kd-5.4.92/source-optimizations-v7.patch",
+  "source/MPL-2.0/upstream-patches/kd-5.4.92/bundle-optimizations-v7.patch",
+  "source/MPL-2.0/upstream-patches/kd-5.5.1/README.md",
+  "source/MPL-2.0/upstream-patches/kd-5.5.1/source-optimizations-v1.patch",
+  "source/MPL-2.0/upstream-patches/kd-5.5.1/bundle-optimizations-v1.patch",
+  "source/MIT/packages/tools/src/pixi-filters-patch-v1.ts",
+  "source/MIT/upstream-patches/pixi-filters-5.2.0/README.md",
+  "source/MIT/upstream-patches/pixi-filters-5.2.0/compatibility-v1.patch"
 ] as const;
 
 
@@ -64,7 +80,7 @@ export async function packagePortableMod(options: PackageOptions): Promise<strin
     "This normal-mod build does not modify game files or save data.",
     "Unknown upstream signatures stay on the official JavaScript path.",
     "KD Hybrid is MIT with specifically marked MPL-2.0 adapted files.",
-    "Both licenses, attribution, and MPL-covered source are inside this ZIP.",
+    "Licenses, attribution, and corresponding disclosed source are inside.",
     "See the open-source repository for source, safety details, and the",
     "optional reversible early bootstrap patcher.",
     ""

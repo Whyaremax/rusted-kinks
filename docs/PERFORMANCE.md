@@ -1,5 +1,8 @@
 # Performance methodology
 
+The measurements below cover earlier KD builds. See
+[KD 5.5.6 release validation](KD_5_5_6_RELEASE.md) for this release's measurements.
+
 Performance claims require the same seed, room, save fixture, mod set, viewport,
 quality tier, warm-up period, and action trace for both paths.
 

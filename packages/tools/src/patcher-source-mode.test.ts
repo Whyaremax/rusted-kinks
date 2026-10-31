@@ -35,9 +35,10 @@ const injectedFailure = vi.hoisted(() => ({
 }));
 
 vi.mock("node:fs/promises", async () => {
-  const actual = await vi.importActual<typeof import("node:fs/promises")>(
-    "node:fs/promises"
-  );
+  const actual =
+    await vi.importActual<typeof import("node:fs/promises")>(
+      "node:fs/promises"
+    );
   return {
     ...actual,
     rename: async (
@@ -57,15 +58,19 @@ vi.mock("node:fs/promises", async () => {
 });
 
 vi.mock("./kd-source-patches.js", async () => {
-  const actual = await vi.importActual<
-    typeof import("./kd-source-patches.js")
-  >("./kd-source-patches.js");
+  const actual = await vi.importActual<typeof import("./kd-source-patches.js")>(
+    "./kd-source-patches.js"
+  );
   return {
     ...actual,
     findKDSourcePatch: (inputSha256: string) =>
       inputSha256 === patchFixture.originalSha256
         ? patchFixture.patch
         : actual.findKDSourcePatch(inputSha256),
+    findKDSourcePatchById: (id: string) =>
+      id === patchFixture.patch.id
+        ? patchFixture.patch
+        : actual.findKDSourcePatchById(id),
     applyKDSourcePatch: (text: string, inputSha256: string) =>
       inputSha256 === patchFixture.originalSha256 &&
       text === patchFixture.original
@@ -77,21 +82,16 @@ vi.mock("./kd-source-patches.js", async () => {
   };
 });
 
-import {
-  install,
-  status,
-  uninstall,
-  updateConfiguration
-} from "./patcher.js";
+import { install, status, uninstall, updateConfiguration } from "./patcher.js";
 
 const fixtures: string[] = [];
 
 afterEach(async () => {
   injectedFailure.manifestRenameFailures = 0;
   await Promise.all(
-    fixtures.splice(0).map((fixture) =>
-      rm(fixture, { recursive: true, force: true })
-    )
+    fixtures
+      .splice(0)
+      .map((fixture) => rm(fixture, { recursive: true, force: true }))
   );
 });
 
@@ -149,7 +149,9 @@ describe("source optimization selection", () => {
     expect(reapplied.manifest?.sourcePatch?.enabled).toBe(true);
     expect(await bundleText(fixture.appRoot)).toBe(patchFixture.optimized);
     expect(await readFile(backupPath, "utf8")).toBe(patchFixture.original);
-    expect(await readFile(join(fixture.appRoot, "index.html"))).toEqual(indexBefore);
+    expect(await readFile(join(fixture.appRoot, "index.html"))).toEqual(
+      indexBefore
+    );
     const reappliedManifest = await readFile(manifestPath);
 
     await updateConfiguration(fixture.appRoot, {
@@ -344,7 +346,9 @@ describe("source optimization selection", () => {
     await installFixture(fixture);
     const manifestPath = installationManifestPath(fixture.appRoot);
     const manifestBefore = await readFile(manifestPath);
-    const bundleBefore = await readFile(join(fixture.appRoot, "out", "main.js"));
+    const bundleBefore = await readFile(
+      join(fixture.appRoot, "out", "main.js")
+    );
 
     await expect(
       updateConfiguration(fixture.appRoot, {

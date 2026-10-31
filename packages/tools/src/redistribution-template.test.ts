@@ -28,6 +28,7 @@ const templatePath = join(
 describe("PowerShell redistribution template", () => {
   it("exposes every supported texture and source mode", async () => {
     const source = await readFile(templatePath, "utf8");
+    expect(source).toContain('[string]$Action = "Install"');
 
     expect(source).toContain(
       '[ValidateSet("auto", "original", "full", "mobile")]',
@@ -78,6 +79,13 @@ describe("PowerShell redistribution template", () => {
           writeFile(join(appRoot, "out", "main.js"), "void 0;\n"),
         ]);
 
+        runPatcher(scriptPath, unrelatedCwd, capturePath, ["-GameRoot", gameRoot]);
+        await expectCapture(capturePath, unrelatedCwd, [
+          "install", "--app-root", appRoot, "--payload", join(kitRoot, "bootstrap"),
+          "--pathfinding-mode", "fast", "--texture-mode", "auto",
+          "--source-optimizations", "true",
+        ]);
+
         runPatcher(scriptPath, unrelatedCwd, capturePath, [
           "-Action",
           "Install",
@@ -96,8 +104,6 @@ describe("PowerShell redistribution template", () => {
           appRoot,
           "--payload",
           join(kitRoot, "bootstrap"),
-          "--upstream-version",
-          "5.4.92",
           "--pathfinding-mode",
           "human",
           "--texture-mode",

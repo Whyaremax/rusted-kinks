@@ -126,7 +126,7 @@ MainWindow::MainWindow(const QString& initialPath, QWidget* parent)
     root->addWidget(pathCard);
 
     auto* plannerCard = card();
-    plannerCard->setMinimumHeight(230);
+    plannerCard->setMinimumHeight(340);
     auto* plannerLayout = new QVBoxLayout(plannerCard);
     auto* plannerLabel = new QLabel(QStringLiteral("Pathfinding strategy"));
     plannerLabel->setObjectName(QStringLiteral("sectionTitle"));
@@ -147,7 +147,7 @@ MainWindow::MainWindow(const QString& initialPath, QWidget* parent)
         QStringLiteral("Human-like (fewer zigzags)"),
         QStringLiteral("human"));
     pathfindingMode_->setCurrentIndex(1);
-    applyModeButton_ = new QPushButton(QStringLiteral("Apply mode"));
+    applyModeButton_ = new QPushButton(QStringLiteral("Apply settings"));
     applyModeButton_->setObjectName(QStringLiteral("secondaryButton"));
     applyModeButton_->setEnabled(false);
     plannerRow->addWidget(pathfindingMode_, 1);
@@ -173,11 +173,28 @@ MainWindow::MainWindow(const QString& initialPath, QWidget* parent)
     textureMode_->addItem(QStringLiteral("Mobile atlas"),
                           QStringLiteral("mobile"));
     textureRow->addWidget(textureMode_, 1);
-    textureRow->addWidget(applyModeButton_);
     plannerLayout->addSpacing(8);
     plannerLayout->addWidget(textureLabel);
     plannerLayout->addWidget(textureDetail);
     plannerLayout->addLayout(textureRow);
+
+    auto* sourceLabel = new QLabel(QStringLiteral("Game source mode"));
+    sourceLabel->setObjectName(QStringLiteral("sectionTitle"));
+    auto* sourceDetail = new QLabel(
+        QStringLiteral("Optimized applies the verified source patches. "
+                       "Original keeps the official KD source files."));
+    sourceDetail->setObjectName(QStringLiteral("detail"));
+    sourceDetail->setWordWrap(true);
+    auto* sourceRow = new QHBoxLayout;
+    sourceMode_ = new QComboBox;
+    sourceMode_->addItem(QStringLiteral("Optimized (recommended)"), true);
+    sourceMode_->addItem(QStringLiteral("Original source"), false);
+    sourceRow->addWidget(sourceMode_, 1);
+    sourceRow->addWidget(applyModeButton_);
+    plannerLayout->addSpacing(8);
+    plannerLayout->addWidget(sourceLabel);
+    plannerLayout->addWidget(sourceDetail);
+    plannerLayout->addLayout(sourceRow);
     root->addWidget(plannerCard);
 
     auto* statusCard = card();
@@ -494,7 +511,8 @@ void MainWindow::installBootstrap()
         return kd::Patcher::install(
             pathEdit_->text().trimmed(), false,
             pathfindingMode_->currentData().toString(),
-            textureMode_->currentData().toString());
+            textureMode_->currentData().toString(),
+            sourceMode_->currentData().toBool());
     });
 }
 
@@ -507,7 +525,8 @@ void MainWindow::applyConfiguration()
         return kd::Patcher::updateConfiguration(
             pathEdit_->text().trimmed(),
             pathfindingMode_->currentData().toString(),
-            textureMode_->currentData().toString());
+            textureMode_->currentData().toString(),
+            sourceMode_->currentData().toBool());
     });
 }
 
@@ -579,6 +598,18 @@ void MainWindow::runOperation(
 void MainWindow::displayStatus(const kd::PatcherStatus& status)
 {
     stateBadge_->setText(kd::Patcher::stateName(status.state).toUpper());
+    const QJsonObject settings =
+        status.manifest.value(QStringLiteral("settings")).toObject();
+    const QJsonObject sourcePatch =
+        status.manifest.value(QStringLiteral("sourcePatch")).toObject();
+    const bool sourceOptimizations =
+        settings.contains(QStringLiteral("sourceOptimizations"))
+        ? settings.value(QStringLiteral("sourceOptimizations")).toBool()
+        : !sourcePatch.isEmpty()
+            && sourcePatch.value(QStringLiteral("enabled")).toBool(true);
+    const QString sourceModeName =
+        sourceOptimizations ? QStringLiteral("optimized")
+                            : QStringLiteral("original");
     QString badgeStyle;
     switch (status.state) {
     case kd::PatcherState::Installed:
@@ -610,13 +641,15 @@ void MainWindow::displayStatus(const kd::PatcherStatus& status)
             detailLabel_->setText(
                 status.upgradeAvailable
                     ? QStringLiteral(
-                          "The installed files are verified. Update integration "
-                          "to replace the synthetic menu hook with KD's genuine "
-                          "bridge mod.")
+                          "The installed files are verified in %1 source mode. "
+                          "Update integration to replace the synthetic menu "
+                          "hook with KD's genuine bridge mod.")
+                          .arg(sourceModeName)
                     : QStringLiteral(
-                          "Bootstrap, source optimization, and KD control mod "
-                          "are installed; all files and backups match their "
-                          "recorded hashes."));
+                          "Bootstrap, %1 source mode, and KD control mod are "
+                          "installed; all files and backups match their "
+                          "recorded hashes.")
+                          .arg(sourceModeName));
         } else if (status.inspection.sourcePatched) {
             detailLabel_->setText(QStringLiteral(
                 "This bundle has the recognized source patch but no "
@@ -643,22 +676,22 @@ void MainWindow::displayStatus(const kd::PatcherStatus& status)
         status.state == kd::PatcherState::Installed);
     if (status.state == kd::PatcherState::Installed) {
         const QString mode =
-            status.manifest.value(QStringLiteral("settings"))
-                .toObject()
-                .value(QStringLiteral("pathfindingMode"))
+            settings.value(QStringLiteral("pathfindingMode"))
                 .toString(QStringLiteral("fast"));
         const int index = pathfindingMode_->findData(mode);
         if (index >= 0) {
             pathfindingMode_->setCurrentIndex(index);
         }
         const QString textureMode =
-            status.manifest.value(QStringLiteral("settings"))
-                .toObject()
-                .value(QStringLiteral("textureMode"))
+            settings.value(QStringLiteral("textureMode"))
                 .toString(QStringLiteral("auto"));
         const int textureIndex = textureMode_->findData(textureMode);
         if (textureIndex >= 0) {
             textureMode_->setCurrentIndex(textureIndex);
+        }
+        const int sourceIndex = sourceMode_->findData(sourceOptimizations);
+        if (sourceIndex >= 0) {
+            sourceMode_->setCurrentIndex(sourceIndex);
         }
     }
     openFolderButton_->setEnabled(true);
@@ -672,6 +705,7 @@ void MainWindow::setBusy(bool busy)
     refreshButton_->setEnabled(!busy);
     pathfindingMode_->setEnabled(!busy);
     textureMode_->setEnabled(!busy);
+    sourceMode_->setEnabled(!busy);
     applyModeButton_->setEnabled(!busy && hasStatus_
                                  && status_.state
                                         == kd::PatcherState::Installed);

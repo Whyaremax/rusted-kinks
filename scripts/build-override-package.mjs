@@ -7,7 +7,6 @@ import {
   readdir,
   rm,
   stat,
-  writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -17,6 +16,11 @@ import { zipSync } from "fflate";
 const zipMtime = new Date(1980, 0, 1, 0, 0, 0);
 
 import { install, KNOWN_BUNDLES } from "../packages/tools/dist/patcher.js";
+import { findKDSourcePatch } from "../packages/tools/dist/kd-source-patches.js";
+import {
+  publishOverrideOutputs,
+  validateOverrideOutputPaths,
+} from "./lib/override-output-safety.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
 const metadata = JSON.parse(
@@ -35,6 +39,7 @@ if (!appRootInput) {
   );
 }
 
+const selectedAppTree = path.resolve(appRootInput);
 const appRoot = await normalizeAppRoot(appRootInput);
 const sourceBundle = path.join(appRoot, "out", "main.js");
 const sourceIndex = path.join(appRoot, "index.html");
@@ -42,20 +47,61 @@ const before = {
   bundle: await sha256File(sourceBundle),
   index: await sha256File(sourceIndex),
 };
-const known = KNOWN_BUNDLES["5.4.92"];
-if (before.bundle !== known.bundleSha256) {
+const knownEntry = Object.entries(KNOWN_BUNDLES).find(
+  ([, candidate]) => candidate.bundleSha256 === before.bundle,
+);
+if (knownEntry === undefined) {
   throw new Error(
-    `Override package requires the clean KD 5.4.92 bundle ${known.bundleSha256}; found ${before.bundle}`,
+    `Override package requires an exact supported clean KD bundle; found ${before.bundle}`,
   );
+}
+const [gameVersion] = knownEntry;
+const sourcePatch = findKDSourcePatch(before.bundle);
+if (sourcePatch === undefined) {
+  throw new Error(
+    `Override package has no active source transformation for KD ${gameVersion}`,
+  );
+}
+const sourcePatchFiles = sourcePatch.files ?? [
+  {
+    path: "out/main.js",
+    inputSha256: sourcePatch.inputSha256,
+    outputSha256: sourcePatch.outputSha256,
+  },
+];
+const originalSourceHashes = new Map();
+for (const file of sourcePatchFiles) {
+  const source = path.join(appRoot, ...file.path.split("/"));
+  const hash = await sha256File(source);
+  if (hash !== file.inputSha256) {
+    throw new Error(
+      `Override package requires exact ${file.path} ${file.inputSha256}; found ${hash}`,
+    );
+  }
+  originalSourceHashes.set(file.path, hash);
 }
 
 const releaseName = sourceMode === "optimized"
-  ? `KD-Hybrid-${metadata.version}-Manual-Resources-KD-5.4.92`
-  : `KD-Hybrid-${metadata.version}-Manual-Resources-KD-5.4.92-Source-Compatible`;
+  ? `KD-Hybrid-${metadata.version}-Manual-Resources-KD-${gameVersion}`
+  : `KD-Hybrid-${metadata.version}-Manual-Resources-KD-${gameVersion}-Source-Compatible`;
 const output =
   optionValue("--output") ??
   path.join("redistribution", "releases", `${releaseName}.zip`);
 const outputPath = path.resolve(root, output);
+const payloadRoot = path.join(root, "dist", "bootstrap");
+const protectedBuildInputs = [
+  sourceIndex,
+  sourceBundle,
+  payloadRoot,
+  ...sourcePatchFiles.map((file) =>
+    path.join(appRoot, ...file.path.split("/")),
+  ),
+];
+await validateOverrideOutputPaths({
+  appRoot: selectedAppTree,
+  outputPath,
+  protectedInputs: protectedBuildInputs,
+});
 const temporaryRoot = await mkdtemp(
   path.join(tmpdir(), "kd-hybrid-override-"),
 );
@@ -70,15 +116,30 @@ try {
     mkdir(path.join(stagedApp, "out"), { recursive: true }),
     mkdir(path.join(releaseApp, "out"), { recursive: true }),
     mkdir(releaseMods, { recursive: true }),
+    ...sourcePatchFiles.flatMap((file) => [
+      mkdir(
+        path.dirname(path.join(stagedApp, ...file.path.split("/"))),
+        { recursive: true },
+      ),
+      mkdir(
+        path.dirname(path.join(releaseApp, ...file.path.split("/"))),
+        { recursive: true },
+      ),
+    ]),
   ]);
   await Promise.all([
     cp(sourceIndex, path.join(stagedApp, "index.html")),
-    cp(sourceBundle, path.join(stagedApp, "out", "main.js")),
+    ...sourcePatchFiles.map((file) =>
+      cp(
+        path.join(appRoot, ...file.path.split("/")),
+        path.join(stagedApp, ...file.path.split("/")),
+      ),
+    ),
   ]);
 
   const installed = await install({
     appRoot: stagedApp,
-    payloadRoot: path.join(root, "dist", "bootstrap"),
+    payloadRoot,
     toolVersion: metadata.version,
     pathfindingMode: "fast",
     textureMode: "auto",
@@ -109,29 +170,45 @@ try {
     ),
   ]);
   if (sourceMode === "optimized") {
-    await cp(
-      path.join(stagedApp, "out", "main.js"),
-      path.join(releaseApp, "out", "main.js"),
+    await Promise.all(
+      sourcePatchFiles.map((file) =>
+        cp(
+          path.join(stagedApp, ...file.path.split("/")),
+          path.join(releaseApp, ...file.path.split("/")),
+        ),
+      ),
     );
-  } else if (
-    (await sha256File(path.join(stagedApp, "out", "main.js"))) !== before.bundle
-  ) {
-    throw new Error("Source-compatible staging changed the official source bundle");
+  } else {
+    for (const file of sourcePatchFiles) {
+      const stagedHash = await sha256File(
+        path.join(stagedApp, ...file.path.split("/")),
+      );
+      if (stagedHash !== file.inputSha256) {
+        throw new Error(
+          `Source-compatible staging changed official ${file.path}`,
+        );
+      }
+    }
   }
 
   const files = await collectFiles(releaseRoot);
-  await auditOverride(files, releaseRoot, before, sourceMode);
+  await auditOverride(
+    files,
+    releaseRoot,
+    before,
+    sourceMode,
+    sourcePatchFiles,
+  );
   if (sourceMode === "optimized") {
-    const patchedBundleSha256 = await sha256File(
-      path.join(releaseApp, "out", "main.js"),
-    );
-    if (
-      patchedBundleSha256 !==
-      installed.manifest.sourcePatch.patchedSha256
-    ) {
-      throw new Error(
-        `Override bundle hash mismatch: ${patchedBundleSha256}`,
+    for (const file of sourcePatchFiles) {
+      const patchedSha256 = await sha256File(
+        path.join(releaseApp, ...file.path.split("/")),
       );
+      if (patchedSha256 !== file.outputSha256) {
+        throw new Error(
+          `Override ${file.path} hash mismatch: ${patchedSha256}`,
+        );
+      }
     }
   }
   const archive = {};
@@ -139,28 +216,46 @@ try {
     archive[portable(path.relative(releaseRoot, file))] =
       await readFile(file);
   }
-  await mkdir(path.dirname(outputPath), { recursive: true });
-  await writeFile(outputPath, zipSync(archive, { level: 9, mtime: zipMtime }));
-  await writeFile(
-    `${outputPath}.sha256.txt`,
-    `${await sha256File(outputPath)}  ${path.basename(outputPath)}\n`,
-  );
-
-  const after = {
-    bundle: await sha256File(sourceBundle),
-    index: await sha256File(sourceIndex),
-  };
-  if (after.bundle !== before.bundle || after.index !== before.index) {
-    throw new Error("Source game files changed while building the override");
-  }
+  const archiveBytes = zipSync(archive, { level: 9, mtime: zipMtime });
+  const archiveSha256 = createHash("sha256")
+    .update(archiveBytes)
+    .digest("hex");
+  await publishOverrideOutputs({
+    outputPath,
+    archiveBytes,
+    sidecarText: `${archiveSha256}  ${path.basename(outputPath)}\n`,
+    revalidate: async () => {
+      await validateOverrideOutputPaths({
+        appRoot: selectedAppTree,
+        outputPath,
+        protectedInputs: protectedBuildInputs,
+      });
+      const afterIndex = await sha256File(sourceIndex);
+      const sourceChanged =
+        afterIndex !== before.index ||
+        (
+          await Promise.all(
+            sourcePatchFiles.map(async (file) => {
+              const current = await sha256File(
+                path.join(appRoot, ...file.path.split("/")),
+              );
+              return current !== originalSourceHashes.get(file.path);
+            }),
+          )
+        ).some(Boolean);
+      if (sourceChanged) {
+        throw new Error("Source game files changed while building the override");
+      }
+    },
+  });
   process.stdout.write(
     `${JSON.stringify(
       {
         state: "ready",
         sourceMode,
         output: outputPath,
-        bytes: (await stat(outputPath)).size,
-        sha256: await sha256File(outputPath),
+        bytes: archiveBytes.length,
+        sha256: archiveSha256,
         files: files.length,
         cleanBackups: 0,
         inputUnchanged: true,
@@ -238,6 +333,7 @@ async function auditOverride(
   releaseRootPath,
   original,
   selectedSourceMode,
+  patchFiles,
 ) {
   const forbiddenExtension =
     /\.(exe|dll|com|msi|ps1|bat|cmd|vbs|sh)$/iu;
@@ -263,16 +359,24 @@ async function auditOverride(
     "resources/app/kd-hybrid/NOTICE.txt",
     "resources/app/kd-hybrid/LICENSES/ACORN-MIT.txt",
     "resources/app/kd-hybrid/LICENSES/MIT.txt",
+    "resources/app/kd-hybrid/LICENSES/PIXI-FILTERS-MIT.txt",
     "resources/app/kd-hybrid/LICENSES/MPL-2.0.txt",
     "resources/app/kd-hybrid/SOURCE.txt",
     "Mods/KDHybridBridge.zip",
   ];
   if (selectedSourceMode === "optimized") {
-    required.push("resources/app/out/main.js");
-  } else if (relations.includes("resources/app/out/main.js")) {
-    throw new Error(
-      "Source-compatible manual package must omit resources/app/out/main.js",
+    required.push(
+      ...patchFiles.map((file) => `resources/app/${file.path}`),
     );
+  } else {
+    for (const file of patchFiles) {
+      const packagedPath = `resources/app/${file.path}`;
+      if (relations.includes(packagedPath)) {
+        throw new Error(
+          `Source-compatible manual package must omit ${packagedPath}`,
+        );
+      }
+    }
   }
   for (const relative of required) {
     if (!relations.includes(relative)) {

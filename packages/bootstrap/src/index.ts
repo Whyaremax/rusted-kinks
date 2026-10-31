@@ -18,6 +18,7 @@ import {
   waitForKinkyDungeonMapGenerationAdapter,
   waitForKinkyDungeonPathfindingAdapter,
 } from "./kd-adapters.js";
+import { hasGameplaySourceOptimizations } from "./source-compatibility.js";
 import {
   installKinkyDungeonRendering,
   type KinkyDungeonRenderingHandle,
@@ -189,7 +190,7 @@ export function installBootstrap(): BootstrapHandle {
   const modPreflight = installKinkyDungeonModPreflight({
     waitFor: modTranslator.loaderReady,
     activationBarrier: nativeReady,
-    sourceOptimizationsActive: config?.sourceOptimizations !== false,
+    sourceOptimizationsActive: hasGameplaySourceOptimizations(config),
     ...(compatibilityDecisionStore === undefined
       ? {}
       : { decisionStore: compatibilityDecisionStore }),

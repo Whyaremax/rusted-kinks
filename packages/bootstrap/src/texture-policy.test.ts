@@ -1,12 +1,20 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { KNOWN_UPSTREAM } from "@kd-hybrid/runtime";
+import {
+  KNOWN_UPSTREAM,
+  KNOWN_UPSTREAM_5_5_1
+} from "@kd-hybrid/runtime";
 
 import { installKinkyDungeonTexturePolicy } from "./texture-policy.js";
 
 const EXACT_OPTIONS = Object.freeze({
   upstreamVersion: KNOWN_UPSTREAM.gameVersion,
   upstreamBundleSha256: KNOWN_UPSTREAM.bundleSha256
+});
+
+const EXACT_5_5_1_OPTIONS = Object.freeze({
+  upstreamVersion: KNOWN_UPSTREAM_5_5_1.gameVersion,
+  upstreamBundleSha256: KNOWN_UPSTREAM_5_5_1.bundleSha256
 });
 
 describe("Kinky Dungeon texture policy", () => {
@@ -90,6 +98,39 @@ describe("Kinky Dungeon texture policy", () => {
     });
   });
 
+  it("supports the exact 5.5.1 release and uppercase bundle hash", () => {
+    const original = JSON.stringify({ MobileTextures: false, Bloom: true });
+    const entries = new Map([["KDToggles", original]]);
+    const { storage } = createStorage(entries);
+    const textures = installKinkyDungeonTexturePolicy(
+      {
+        ...EXACT_5_5_1_OPTIONS,
+        upstreamBundleSha256:
+          EXACT_5_5_1_OPTIONS.upstreamBundleSha256.toUpperCase(),
+        textureMode: "mobile"
+      },
+      exactTarget(storage)
+    );
+
+    expect(JSON.parse(storage.getItem("KDToggles") ?? "{}")).toMatchObject({
+      MobileTextures: true,
+      Bloom: true
+    });
+    expect(JSON.parse(storage.getItem("KDToggles") ?? "{}")).toMatchObject({
+      MobileTextures: true,
+      Bloom: true
+    });
+    expect(storage.getItem("KDToggles")).toBe(original);
+    expect(entries.get("KDToggles")).toBe(original);
+    expect(textures.status()).toMatchObject({
+      compatible: true,
+      compatibilityReason: "exact-kd-bundle-pixi-match",
+      textureMode: "mobile",
+      textureOverrideRestored: true,
+      lastError: null
+    });
+  });
+
   it.each([
     {
       name: "game version",
@@ -108,6 +149,31 @@ describe("Kinky Dungeon texture policy", () => {
       },
       pixiVersion: "7.2.1",
       reason: "unsupported-kd-bundle:different"
+    },
+    {
+      name: "missing game version",
+      options: {
+        upstreamBundleSha256: KNOWN_UPSTREAM.bundleSha256
+      },
+      pixiVersion: "7.2.1",
+      reason: "unsupported-kd-version:unknown"
+    },
+    {
+      name: "missing bundle hash",
+      options: {
+        upstreamVersion: KNOWN_UPSTREAM.gameVersion
+      },
+      pixiVersion: "7.2.1",
+      reason: "unsupported-kd-bundle:unknown"
+    },
+    {
+      name: "cross-paired release metadata",
+      options: {
+        upstreamVersion: KNOWN_UPSTREAM_5_5_1.gameVersion,
+        upstreamBundleSha256: KNOWN_UPSTREAM.bundleSha256
+      },
+      pixiVersion: "7.2.1",
+      reason: `mismatched-kd-release:${KNOWN_UPSTREAM_5_5_1.gameVersion}:${KNOWN_UPSTREAM.bundleSha256}`
     },
     {
       name: "Pixi version",

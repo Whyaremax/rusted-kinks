@@ -50,6 +50,7 @@ private:
     QPushButton* openFolderButton_ = nullptr;
     QComboBox* pathfindingMode_ = nullptr;
     QComboBox* textureMode_ = nullptr;
+    QComboBox* sourceMode_ = nullptr;
     QPushButton* applyModeButton_ = nullptr;
     QProgressBar* progress_ = nullptr;
     QPlainTextEdit* log_ = nullptr;

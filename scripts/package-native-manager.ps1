@@ -96,19 +96,20 @@ Copy-Item -LiteralPath (Join-Path $repoRoot "LICENSE") `
     -Destination (Join-Path $licenseRoot "KD-Hybrid-MIT.txt")
 Copy-Item -LiteralPath (Join-Path $repoRoot "LICENSES\ACORN-MIT.txt") `
     -Destination (Join-Path $licenseRoot "ACORN-MIT.txt")
+Copy-Item -LiteralPath (Join-Path $repoRoot "LICENSES\PIXI-FILTERS-MIT.txt") `
+    -Destination (Join-Path $licenseRoot "PIXI-FILTERS-MIT.txt")
 Copy-Item -LiteralPath (Join-Path $repoRoot "LICENSES\MPL-2.0.txt") `
     -Destination (Join-Path $licenseRoot "MPL-2.0.txt")
 Copy-Item -LiteralPath (Join-Path $repoRoot "NOTICE.md") `
     -Destination (Join-Path $licenseRoot "KD-Hybrid-NOTICE.txt")
 Copy-Item -LiteralPath (Join-Path $repoRoot "native\manager\THIRD_PARTY.md") `
     -Destination (Join-Path $licenseRoot "THIRD-PARTY.txt")
-$mplSource = Join-Path $repoRoot "dist\bootstrap\source\MPL-2.0"
-if (-not (Test-Path -LiteralPath $mplSource -PathType Container)) {
-    throw "MPL source payload is missing. Run npm run build first."
+$disclosedSource = Join-Path $repoRoot "dist\bootstrap\source"
+if (-not (Test-Path -LiteralPath $disclosedSource -PathType Container)) {
+    throw "Disclosed source payload is missing. Run npm run build first."
 }
 $sourceRoot = Join-Path $stageRoot "source"
-New-Item -ItemType Directory -Path $sourceRoot -Force | Out-Null
-Copy-Item -LiteralPath $mplSource -Destination $sourceRoot -Recurse
+Copy-Item -LiteralPath $disclosedSource -Destination $sourceRoot -Recurse
 [IO.File]::WriteAllText(
     (Join-Path $licenseRoot "LZMA-SDK-Notice.txt"),
     @"

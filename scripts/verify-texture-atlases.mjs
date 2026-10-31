@@ -12,8 +12,22 @@ async function main() {
   const options = parseArgs(process.argv.slice(2));
   const atlasRoot = path.resolve(options.appRoot, "TextureAtlas");
   const groups = [];
+  const bundle = await readFile(path.join(options.appRoot, "out/main.js"), "utf8");
+  const activeModelLayout = bundle.includes('"TextureAtlas/models_0000.json"') &&
+    bundle.includes('"TextureAtlas/models_mobile_0000.json"');
+  let sharedAtlasDecodedBytes = 0;
+  const sharedAtlases = [];
 
-  for (const suffix of GROUPS) {
+  if (activeModelLayout) {
+    const full = await readAtlasFamily(atlasRoot, "models_0000.json", true);
+    const mobile = await readAtlasFamily(atlasRoot, "models_mobile_0000.json", true);
+    groups.push(compareFamilies("models", full, mobile));
+    for (const name of ["game_0000.json", "displacement_0000.json"]) {
+      const family = await readAtlasFamily(atlasRoot, name, true);
+      sharedAtlasDecodedBytes += family.decodedBytes;
+      sharedAtlases.push({root: name, pages: family.pages, frameCount: family.frames.size, decodedBytes: family.decodedBytes});
+    }
+  } else for (const suffix of GROUPS) {
     const full = await readAtlasFamily(atlasRoot, `atlas${suffix}0.json`);
     const mobile = await readAtlasFamily(
       atlasRoot,
@@ -45,11 +59,19 @@ async function main() {
     generatedAt: new Date().toISOString(),
     appRoot: options.appRoot,
     atlasRoot,
+    activeLayout: activeModelLayout ? "game-models-displacement" : "legacy-six-families",
+    sharedAtlases,
     logicalSourceTolerance: LOGICAL_SOURCE_TOLERANCE,
     packerEdgeTolerance: PACKER_EDGE_TOLERANCE,
     groups,
     totals: {
       ...totals,
+      ...(activeModelLayout ? {
+        sharedAtlasDecodedBytes,
+        activeStartupFullDecodedBytes: totals.fullDecodedBytes + sharedAtlasDecodedBytes,
+        activeStartupMobileDecodedBytes: totals.mobileDecodedBytes + sharedAtlasDecodedBytes,
+        activeStartupDecodedReductionRatio: 1 - (totals.mobileDecodedBytes + sharedAtlasDecodedBytes) / (totals.fullDecodedBytes + sharedAtlasDecodedBytes)
+      } : {}),
       decodedBytesSaved:
         totals.fullDecodedBytes - totals.mobileDecodedBytes,
       decodedReductionRatio:
@@ -85,7 +107,7 @@ function parseArgs(argv) {
   return values;
 }
 
-async function readAtlasFamily(atlasRoot, rootName) {
+async function readAtlasFamily(atlasRoot, rootName, allowMissingSourceFingerprint = false) {
   const root = await readManifest(atlasRoot, rootName);
   const related = root.json.meta?.related_multi_packs ?? [];
   if (
@@ -102,7 +124,7 @@ async function readAtlasFamily(atlasRoot, rootName) {
   if (!Number.isFinite(scale) || scale <= 0) {
     throw new Error(`${rootName} has an invalid scale`);
   }
-  const sourceFingerprint = smartUpdateSourceFingerprint(
+  const sourceFingerprint = allowMissingSourceFingerprint && root.json.meta?.smartupdate === undefined ? null : smartUpdateSourceFingerprint(
     root.json.meta?.smartupdate,
     rootName
   );
@@ -116,10 +138,10 @@ async function readAtlasFamily(atlasRoot, rootName) {
       throw new Error(`${manifest.name} has a different family scale`);
     }
     if (
-      smartUpdateSourceFingerprint(
+      (allowMissingSourceFingerprint && manifest.json.meta?.smartupdate === undefined ? null : smartUpdateSourceFingerprint(
         manifest.json.meta?.smartupdate,
         manifest.name
-      ) !== sourceFingerprint
+      )) !== sourceFingerprint
     ) {
       throw new Error(`${manifest.name} has a different source fingerprint`);
     }
@@ -142,7 +164,7 @@ async function readAtlasFamily(atlasRoot, rootName) {
       if (frames.has(frameName)) {
         throw new Error(`${rootName} repeats frame ${frameName}`);
       }
-      validateFrame(frameName, frame, manifest.name, width, height);
+      validateFrame(frameName, frame, manifest.name, width, height, allowMissingSourceFingerprint);
       frames.set(frameName, frame);
     }
   }
@@ -201,11 +223,16 @@ function compareFamilies(group, full, mobile) {
 
   let maximumLogicalSourceDelta = 0;
   let trimmedFlagDifferences = 0;
+  let emptyPlaceholders = 0;
   for (const [name, fullFrame] of full.frames) {
     const mobileFrame = mobile.frames.get(name);
     if (mobileFrame === undefined) {
       throw new Error(`${group} mobile atlas is missing ${name}`);
     }
+    const fullEmpty = fullFrame.frame.w === 0 && fullFrame.frame.h === 0;
+    const mobileEmpty = mobileFrame.frame.w === 0 && mobileFrame.frame.h === 0;
+    if (fullEmpty !== mobileEmpty) throw new Error(`${group} blank-frame coverage differs for ${name}`);
+    if (fullEmpty) emptyPlaceholders += 1;
     if (fullFrame.rotated !== mobileFrame.rotated) {
       throw new Error(`${group} rotation differs for ${name}`);
     }
@@ -234,6 +261,7 @@ function compareFamilies(group, full, mobile) {
     group,
     sourceFingerprint: full.sourceFingerprint,
     frameCount: full.frames.size,
+    emptyPlaceholders,
     maximumLogicalSourceDelta,
     trimmedFlagDifferences,
     full: {
@@ -251,7 +279,7 @@ function compareFamilies(group, full, mobile) {
   };
 }
 
-function validateFrame(name, value, manifestName, pageWidth, pageHeight) {
+function validateFrame(name, value, manifestName, pageWidth, pageHeight, allowEmptyPlaceholder = false) {
   if (typeof value !== "object" || value === null) {
     throw new Error(`${manifestName} has an invalid frame ${name}`);
   }
@@ -268,11 +296,16 @@ function validateFrame(name, value, manifestName, pageWidth, pageHeight) {
     value.frame.y,
     `${manifestName} ${name} frame.y`
   );
-  const frameWidth = positiveInteger(
+  const emptyPlaceholder = allowEmptyPlaceholder && value.trimmed === true &&
+    value.frame.w === 0 && value.frame.h === 0 &&
+    value.spriteSourceSize.x === 0 && value.spriteSourceSize.y === 0 &&
+    value.spriteSourceSize.w === 0 && value.spriteSourceSize.h === 0;
+  const packedDimension = emptyPlaceholder ? nonNegativeInteger : positiveInteger;
+  const frameWidth = packedDimension(
     value.frame.w,
     `${manifestName} ${name} frame.w`
   );
-  const frameHeight = positiveInteger(
+  const frameHeight = packedDimension(
     value.frame.h,
     `${manifestName} ${name} frame.h`
   );
@@ -295,17 +328,17 @@ function validateFrame(name, value, manifestName, pageWidth, pageHeight) {
     value.spriteSourceSize.y,
     `${manifestName} ${name} spriteSourceSize.y`
   );
-  const spriteWidth = positiveInteger(
+  const spriteWidth = packedDimension(
     value.spriteSourceSize.w,
     `${manifestName} ${name} spriteSourceSize.w`
   );
-  const spriteHeight = positiveInteger(
+  const spriteHeight = packedDimension(
     value.spriteSourceSize.h,
     `${manifestName} ${name} spriteSourceSize.h`
   );
   const sourceIsPlaceholder = sourceWidth === 0 || sourceHeight === 0;
   if (
-    sourceIsPlaceholder &&
+    sourceIsPlaceholder && !emptyPlaceholder &&
     !(
       sourceWidth === 0 &&
       sourceHeight === 0 &&

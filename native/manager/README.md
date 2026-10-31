@@ -7,10 +7,10 @@ mod; Kinky Dungeon's existing mod workflow still handles every other mod.
 The manager:
 
 - accepts either the game root or `resources/app`;
-- recognizes KD 5.4.92 by the exact `out/main.js` SHA-256;
+- recognizes supported KD builds, including 5.5.6, by the exact `out/main.js` SHA-256;
 - reads and writes the same `.kd-hybrid/installation.json` schema as the
   original TypeScript patcher;
-- applies the exact hash-gated KD 5.4.92 source optimization;
+- applies the exact hash-gated source patch for the selected supported build;
 - backs up and atomically updates both `index.html` and `out/main.js`;
 - installs `Mods/KDHybridBridge.zip`, which KD recognizes through its normal
   mod list and uses to render Hybrid settings in the normal configuration UI,

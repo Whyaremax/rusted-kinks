@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   ABI_VERSION,
@@ -992,6 +992,32 @@ describe("Kinky Dungeon enemy-selector invariant hoists", () => {
     expect(firstResult).toMatchObject({ ok: true, value: first });
     expect(secondResult).toMatchObject({ ok: true, value: second });
     expect(test.randomCalls()).toBe(2);
+  });
+
+  it("selects Mimics without repeating KD's debug-console message", () => {
+    const mimic = enemy("Mimic", 10);
+    const test = fixture([mimic], [0.5, 0.5]);
+    const epoch = {};
+    const handler = createKDEnemySelectorHandler({
+      ...test.environment,
+      mapGenerationCacheEpoch: () => epoch,
+      longTagQueryKey: (tags) => enemySelectorLongTagQueryKey(tags),
+      weightedQueryCacheEnabled: () => true,
+    });
+    const tags = Array.from({ length: 100 }, (_, index) => `tag-${index}`);
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    try {
+      const initial = handler(tags, 1, "grv", ".");
+      const cached = handler(tags, 1, "grv", ".");
+
+      expect(initial).toMatchObject({ ok: true, value: mimic });
+      expect(cached).toMatchObject({ ok: true, value: mimic });
+      expect(test.randomCalls()).toBe(2);
+      expect(log).not.toHaveBeenCalled();
+    } finally {
+      log.mockRestore();
+    }
   });
 
   it("applies tags, requirements, alliances, and bonus weights in KD order", () => {

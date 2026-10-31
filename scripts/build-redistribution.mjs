@@ -19,6 +19,9 @@ const root = path.resolve(import.meta.dirname, "..");
 const metadata = JSON.parse(
   await readFile(path.join(root, "package.json"), "utf8"),
 );
+const bootstrapVersion = JSON.parse(
+  await readFile(path.join(root, "dist", "bootstrap", "version.json"), "utf8"),
+);
 const version = metadata.version;
 const redistributionRoot = path.join(root, "redistribution");
 const releasesRoot = path.join(redistributionRoot, "releases");
@@ -71,6 +74,10 @@ await Promise.all([
     path.join(kitRoot, "LICENSES", "ACORN-MIT.txt"),
   ),
   cp(
+    path.join(root, "LICENSES", "PIXI-FILTERS-MIT.txt"),
+    path.join(kitRoot, "LICENSES", "PIXI-FILTERS-MIT.txt"),
+  ),
+  cp(
     path.join(root, "LICENSES", "MPL-2.0.txt"),
     path.join(kitRoot, "LICENSES", "MPL-2.0.txt"),
   ),
@@ -79,26 +86,26 @@ await Promise.all([
 
 const distributableFiles = await collectFiles(kitRoot);
 auditFiles(distributableFiles);
+const gameCompatibilities = bootstrapVersion.upstreams.map((upstream) => ({
+  version: upstream.gameVersion,
+  packageVersion: upstream.packageVersion,
+  bundleSha256: upstream.bundleSha256,
+}));
+const sourcePatches = bootstrapVersion.sourcePatches.map(
+  bootstrapSourcePatchPaths,
+);
 const manifest = {
   schema: 1,
   project: "KD Hybrid",
   version,
   source: "https://github.com/Whyaremax/rusted-kinks",
-  gameCompatibility: {
-    version: "5.4.92",
-    packageVersion: "5.1.12",
-    bundleSha256:
-      "2d3041a085cbe475a63227ff40709f6d9c1595c77a58545c69edf359a57605a4",
-  },
-  sourcePatch: {
-    id: "kd-5.4.92-source-optimizations-v6",
-    outputBundleSha256:
-      "aa4c09e73de34b1ab6eea5328880049578963c7c3dcbaae07728ca408da59f92",
-    source:
-      "bootstrap/source/MPL-2.0/upstream-patches/kd-5.4.92/source-optimizations-v6.patch",
-    bundlePatch:
-      "bootstrap/source/MPL-2.0/upstream-patches/kd-5.4.92/bundle-optimizations-v6.patch",
-  },
+  gameCompatibility: gameCompatibilities[0],
+  gameCompatibilities,
+  sourcePatch: sourcePatches[0],
+  sourcePatches,
+  legacySourcePatches: bootstrapVersion.legacySourcePatches.map(
+    bootstrapSourcePatchPaths,
+  ),
   purpose: "optional early bootstrap and exact source optimization patcher",
   containsGameAssets: false,
   containsSaveData: false,
@@ -196,4 +203,34 @@ async function sha256File(file) {
 
 function portablePath(value) {
   return value.split(path.sep).join("/");
+}
+
+function bootstrapSourcePatchPaths(sourcePatch) {
+  return {
+    ...sourcePatch,
+    source: bootstrapPayloadPath(sourcePatch.source),
+    bundlePatch: bootstrapPayloadPath(sourcePatch.bundlePatch),
+    ...(sourcePatch.embeddedPatch === undefined
+      ? {}
+      : {
+          embeddedPatch: bootstrapPayloadPath(sourcePatch.embeddedPatch),
+        }),
+    ...(sourcePatch.files === undefined
+      ? {}
+      : {
+          files: sourcePatch.files.map((file) => ({
+            ...file,
+            ...(file.source === undefined
+              ? {}
+              : { source: bootstrapPayloadPath(file.source) }),
+            ...(file.embeddedPatch === undefined
+              ? {}
+              : { embeddedPatch: bootstrapPayloadPath(file.embeddedPatch) }),
+          })),
+        }),
+  };
+}
+
+function bootstrapPayloadPath(value) {
+  return value.startsWith("source/") ? `bootstrap/${value}` : value;
 }

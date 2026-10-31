@@ -504,7 +504,11 @@ export class LegacySystemDispatcher {
         const nativeResult = Reflect.apply(entry.native, this.#target, args);
         if (isNativeFallbackRequest(nativeResult)) {
           entry.status.fallbackCalls += 1;
-          return this.#invokeFallback(entry, args, invokedThroughFacade);
+          return this.#invokeExplicitFallback(
+            entry,
+            args,
+            invokedThroughFacade,
+          );
         }
         if (isCompletedJavaScriptCall(nativeResult)) {
           entry.status.nativeCalls += 1;
@@ -516,7 +520,10 @@ export class LegacySystemDispatcher {
         entry.status.nativeCalls += 1;
         return nativeResult;
       } catch (error) {
-        if (error instanceof CompletedJavaScriptCallError) {
+        if (
+          error instanceof CompletedJavaScriptCallError ||
+          error instanceof ExplicitFallbackCallError
+        ) {
           entry.status.failures += 1;
           throw error.upstreamError;
         }
@@ -534,11 +541,14 @@ export class LegacySystemDispatcher {
       args: [...args],
       cancelled: false,
     };
+    let phase: "before-hooks" | "invocation" | "after-hooks" =
+      "before-hooks";
     try {
       this.#runHooks(entry.system, "before", context);
+      phase = "invocation";
       if (context.cancelled) {
         entry.status.fallbackCalls += 1;
-        context.result = this.#invokeFallback(
+        context.result = this.#invokeExplicitFallback(
           entry,
           context.args,
           invokedThroughFacade,
@@ -551,7 +561,7 @@ export class LegacySystemDispatcher {
         );
         if (isNativeFallbackRequest(nativeResult)) {
           entry.status.fallbackCalls += 1;
-          context.result = this.#invokeFallback(
+          context.result = this.#invokeExplicitFallback(
             entry,
             context.args,
             invokedThroughFacade,
@@ -567,10 +577,14 @@ export class LegacySystemDispatcher {
           context.result = nativeResult;
         }
       }
+      phase = "after-hooks";
       this.#runHooks(entry.system, "after", context);
       return context.result;
     } catch (error) {
-      if (error instanceof CompletedJavaScriptCallError) {
+      if (
+        error instanceof CompletedJavaScriptCallError ||
+        error instanceof ExplicitFallbackCallError
+      ) {
         context.error = error.upstreamError;
         entry.status.failures += 1;
         this.#runHooks(entry.system, "error", context);
@@ -581,11 +595,32 @@ export class LegacySystemDispatcher {
       entry.status.mode = "js-fallback";
       entry.status.reason = nativeExceptionReason(error);
       this.#runHooks(entry.system, "error", context);
+      if (phase === "after-hooks") {
+        // The native adapter or an explicitly completed JavaScript call has
+        // already committed its result. An after-hook failure can trip later
+        // calls to JavaScript, but replaying official code in this call would
+        // duplicate its side effects.
+        throw error;
+      }
       // Native adapters must be transaction-like and cannot mutate JS state
       // until they have a validated result. Falling back is safe under that
       // contract.
       entry.status.fallbackCalls += 1;
       return this.#invokeFallback(entry, args, invokedThroughFacade);
+    }
+  }
+
+  #invokeExplicitFallback(
+    entry: SystemEntry,
+    args: unknown[],
+    invokedThroughFacade: boolean,
+  ): unknown {
+    try {
+      return this.#invokeFallback(entry, args, invokedThroughFacade);
+    } catch (error) {
+      // Official JavaScript has already been attempted. Preserve its error so
+      // the surrounding native transaction catch cannot invoke it again.
+      throw new ExplicitFallbackCallError(error);
     }
   }
 
@@ -621,6 +656,10 @@ export class LegacySystemDispatcher {
 }
 
 class CompletedJavaScriptCallError {
+  constructor(readonly upstreamError: unknown) {}
+}
+
+class ExplicitFallbackCallError {
   constructor(readonly upstreamError: unknown) {}
 }
 

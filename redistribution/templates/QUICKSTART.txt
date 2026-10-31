@@ -2,7 +2,7 @@ KD Hybrid quick start
 =====================
 
 This kit does not include Kinky Dungeon. Obtain the game separately from its
-official distribution.
+official distribution. Exact KD 5.4.92, 5.5.1 and 5.5.6 builds are supported.
 
 OPTIONAL EARLY BOOTSTRAP PATCH
 
@@ -22,8 +22,8 @@ Change only the installed texture mode later:
 
   .\KDHybrid-Patcher.ps1 -Action Configure -GameRoot "C:\Path\To\Kinky Dungeon" -TextureMode original
 
-The verified KD 5.4.92 source optimizations are installed by default. Select
-the official source bundle while keeping the KD Hybrid bootstrap and runtime:
+The verified exact-build source optimizations are installed by default. Select
+the official source files while keeping the KD Hybrid bootstrap and runtime:
 
   .\KDHybrid-Patcher.ps1 -Action Configure -GameRoot "C:\Path\To\Kinky Dungeon" -SourceMode original
 
@@ -67,21 +67,22 @@ page has already started cannot safely undo an installed source patch.
 
 MANUAL RESOURCE ZIP
 
-The default manual resource ZIP includes the exact-build optimized out/main.js.
-The separately generated source-compatible/original variant deliberately omits
-out/main.js, so copying it onto a clean KD 5.4.92 installation keeps the
-official source bundle. If an optimized manual overlay was already applied,
-restore the official out/main.js first; applying the source-compatible overlay
-alone cannot remove an already copied optimized bundle.
+The default manual resource ZIP includes the exact-build optimized
+out/main.js and Scripts/lib/pixi-filters.js. The separately generated
+source-compatible/original variant deliberately omits both files, so copying
+it onto a clean supported installation keeps the official source files. If an
+optimized manual overlay was already applied, restore both official files
+first; the source-compatible overlay cannot remove previously copied files.
 
 SAVE SAFETY
 
 The patcher does not access Electron userData or the game's save directory.
-It changes resources/app/index.html and, on the exact supported build,
-resources/app/out/main.js. It writes its own files under
+It changes resources/app/index.html and, when exact-build source optimizations
+are enabled, resources/app/out/main.js and
+resources/app/Scripts/lib/pixi-filters.js. It writes its own files under
 resources/app/kd-hybrid and keeps byte-exact backups plus the installation
-manifest under resources/app/.kd-hybrid. Uninstall verifies and restores both
-original files. It also installs one owned Mods/KDHybridBridge.zip file so KD
+manifest under resources/app/.kd-hybrid. Uninstall verifies and restores every
+original file. It also installs one owned Mods/KDHybridBridge.zip file so KD
 can display Hybrid in its normal mod list and configuration screen. Uninstall
 verifies that file before removing it.
 
@@ -90,8 +91,9 @@ Dungeon's existing mod workflow.
 
 LICENSES
 
-Original KD Hybrid files are MIT licensed. Specifically marked adapted source
-files remain MPL-2.0. Exact licenses, notices, and MPL-covered source accompany
-the corresponding generated payloads. Kinky Dungeon is credited to Strait
-Laced Games LLC and its contributors. The exact upstream source revision is
-documented in source/MPL-2.0/upstream-patches/kd-5.4.92/.
+Original KD Hybrid files are MIT licensed. Specifically marked adapted KD
+source remains MPL-2.0. The pixi-filters compatibility delta retains its
+upstream MIT license. Exact licenses, notices, and corresponding source
+accompany each generated payload. Kinky Dungeon is credited to Strait Laced
+Games LLC and its contributors. Exact upstream revisions are documented under
+source/MPL-2.0/upstream-patches/.

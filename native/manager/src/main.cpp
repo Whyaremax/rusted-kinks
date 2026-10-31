@@ -1,3 +1,4 @@
+#include "HeadlessOptions.h"
 #include "MainWindow.h"
 #include "Patcher.h"
 
@@ -31,12 +32,15 @@ int runHeadless(int argc, char* argv[])
         optionValue(arguments, QStringLiteral("--pathfinding-mode"));
     const QString textureMode =
         optionValue(arguments, QStringLiteral("--texture-mode"));
+    const std::optional<bool> sourceOptimizations =
+        kd::parseHeadlessSourceMode(arguments);
     if (command.isEmpty() || appRoot.isEmpty()) {
         throw std::runtime_error(
             "Usage: KDHybridManager --headless "
             "<status|install|configure|uninstall> --app-root <path> "
             "[--pathfinding-mode <quality|fast|human>] "
-            "[--texture-mode <auto|original|full|mobile>]");
+            "[--texture-mode <auto|original|full|mobile>] "
+            "[--source-mode <optimized|original>]");
     }
     kd::PatcherStatus result;
     if (command == QLatin1String("status")) {
@@ -45,14 +49,17 @@ int runHeadless(int argc, char* argv[])
         result = kd::Patcher::install(
             appRoot, false,
             mode.isEmpty() ? QStringLiteral("fast") : mode,
-            textureMode.isEmpty() ? QStringLiteral("auto") : textureMode);
+            textureMode.isEmpty() ? QStringLiteral("auto") : textureMode,
+            sourceOptimizations);
     } else if (command == QLatin1String("configure")) {
-        if (mode.isEmpty() && textureMode.isEmpty()) {
+        if (mode.isEmpty() && textureMode.isEmpty()
+            && !sourceOptimizations.has_value()) {
             throw std::runtime_error(
-                "configure requires --pathfinding-mode or --texture-mode");
+                "configure requires --pathfinding-mode, --texture-mode, or "
+                "--source-mode");
         }
-        result =
-            kd::Patcher::updateConfiguration(appRoot, mode, textureMode);
+        result = kd::Patcher::updateConfiguration(
+            appRoot, mode, textureMode, sourceOptimizations);
     } else if (command == QLatin1String("uninstall")) {
         result = kd::Patcher::uninstall(appRoot);
     } else {

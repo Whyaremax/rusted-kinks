@@ -3,7 +3,6 @@ name: Native manager
 on:
   push:
     branches: [main]
-    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
@@ -51,11 +50,15 @@ jobs:
             throw "LZMA SDK archive hash mismatch: $actual"
           }
           7z x $archive "-o$env:RUNNER_TEMP/lzma-sdk" -y
+      - name: Build production manager without test hooks
+        run: |
+          cmake -S native/manager -B native/manager/build-production -G "Visual Studio 17 2022" -A x64 -DBUILD_TESTING=OFF
+          cmake --build native/manager/build-production --config Release
       - name: Package single-download EXE
         shell: powershell
         run: |
           ./scripts/package-native-manager.ps1 `
-            -BuildDirectory native/manager/build `
+            -BuildDirectory native/manager/build-production `
             -OutputDirectory native/manager/release `
             -SfxModule "$env:RUNNER_TEMP/lzma-sdk/bin/7zSD.sfx"
       - uses: actions/upload-artifact@v4
@@ -72,12 +75,12 @@ jobs:
         include:
           - runner: ubuntu-24.04
             arch: x86_64
-            linuxdeploy_sha256: e87ee0815d109282fdda73e34c2361d64d02b0ffaea3674b18f1fd1f6a687dcf
-            qt_plugin_sha256: be1b7e166bf9975cfb694ebe6759ba40502ffc6196440d3e64aa90c4dbd67e9f
+            linuxdeploy_sha256: 8aea8da0f7f7039d2a2cecb14657d752a222a5e1d3825caeef186c82f751cdd1
+            qt_plugin_sha256: cfc1055b2b9dbc08412b579f20990b7b41a17b61beaa5847dc9477c96c9e9617
           - runner: ubuntu-24.04-arm
             arch: aarch64
-            linuxdeploy_sha256: 650ed1d045a09ab87855be1963f4f56ac7cf6defb6b2e2f4af0a3225f3d2d803
-            qt_plugin_sha256: 5525e6c49c3c774c02b8864d2acc2ae4c5c0ccc3327f7dce626deaa36348e5c6
+            linuxdeploy_sha256: 5c1fddf96066891e829831cac0d84424690f3b22846c7f8f1bb9990a5c6c73f4
+            qt_plugin_sha256: d5b5a9020065cefda8c7af7c9500f686b23640eac50c88201a81752c6ee2e49c
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -112,38 +115,20 @@ jobs:
           echo "${{ matrix.linuxdeploy_sha256 }}  linuxdeploy-${{ matrix.arch }}.AppImage" | sha256sum --check
           echo "${{ matrix.qt_plugin_sha256 }}  linuxdeploy-plugin-qt-${{ matrix.arch }}.AppImage" | sha256sum --check
           chmod +x linuxdeploy-${{ matrix.arch }}.AppImage linuxdeploy-plugin-qt-${{ matrix.arch }}.AppImage
+      - name: Build production manager without test hooks
+        run: |
+          cmake -S native/manager -B native/manager/build-production -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+          cmake --build native/manager/build-production
       - name: Package AppImage
         env:
           APPIMAGE_EXTRACT_AND_RUN: "1"
         run: |
           chmod +x scripts/package-native-manager-linux.sh
           scripts/package-native-manager-linux.sh \
-            native/manager/build native/manager/release ${{ matrix.arch }}
+            native/manager/build-production native/manager/release ${{ matrix.arch }}
       - uses: actions/upload-artifact@v4
         with:
           name: kd-hybrid-manager-linux-${{ matrix.arch }}
           path: |
             native/manager/release/KD-Hybrid-Manager-Linux-${{ matrix.arch }}.AppImage
             native/manager/release/KD-Hybrid-Manager-Linux-${{ matrix.arch }}.AppImage.sha256
-
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [windows, linux]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: kd-hybrid-manager-*
-          path: release
-          merge-multiple: true
-      - name: Publish native manager assets
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create "${GITHUB_REF_NAME}" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --generate-notes \
-            --title "KD Hybrid ${GITHUB_REF_NAME}" \
-            release/*

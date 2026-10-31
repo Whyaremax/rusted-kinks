@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.5-rc.1 - KD 5.5.6
+
+- Support the exact official KD 5.5.6 desktop bundle and its active atlas layout.
+- Retain startup/mobile-atlas improvements and guarded nearby/jail-key adapters.
+- Hoist primitive path-cache key construction with the existing compatibility bypass.
+- Preserve official changed pathfinding/map-generation behavior.
+- Recognize and migrate the earlier 5.5.6 source patch with verified restoration.
+
 ## Unreleased
 
 - Consolidated the final accepted KD 5.4.92 source work as patch v6. The

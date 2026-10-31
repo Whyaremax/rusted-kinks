@@ -12,6 +12,7 @@ import {
   encodeQuery,
   encodeSnapshot,
   functionSignature,
+  isNativeFunction,
   stableHash,
   useJavaScriptFallback,
   type CompletedJavaScriptCall,
@@ -31,6 +32,20 @@ const MAX_WEIGHT_UNITS = 0x7f;
 const MAX_NEARBY_OFFSET_TEMPLATES = 32;
 const MAX_ENEMY_CACHE_JOURNAL_CELLS = 8_192;
 const MAX_COMMANDER_HELP_REFRESH_SCANS = 16;
+const KD_OBJECT_GET_OWN_PROPERTY_DESCRIPTOR = Object.getOwnPropertyDescriptor;
+const KD_OBJECT_GET_PROTOTYPE_OF = Object.getPrototypeOf;
+
+export function matchesKnownFunctionSignature(
+  actual: string,
+  expected: string | readonly string[],
+): boolean {
+  if (typeof expected === "string") return actual === expected;
+  for (let index = 0; index < expected.length; index += 1) {
+    if (expected[index] === actual) return true;
+  }
+  return false;
+}
+
 export const KD_NEAREST_PLAYER_SOURCE_PATCH_VERSION = "5.4.92-source-v1";
 export const KD_ENEMY_POSITION_CACHE_COMPATIBILITY_FLAG =
   "disableEnemyPositionCacheOptimizations";
@@ -224,10 +239,20 @@ export function kdEnemyPositionCacheOptimizationsEnabled(
   }
 }
 
-const KNOWN_COMMANDER_ORDER_FINGERPRINT = "689f0641fa0c7af8";
+const KNOWN_COMMANDER_ORDER_FINGERPRINTS = Object.freeze([
+  "689f0641fa0c7af8",
+  // KD 5.5.1 changes dialogue parameter plumbing in order apply methods;
+  // the two guarded rescue filters and their classifier contracts are exact.
+  "cbe8597dea148583",
+]);
 const KNOWN_COMMANDER_CLASSIFIER_SIGNATURES = Object.freeze({
   KDBoundEffects: "91258688d4860b1e",
-  KDIsImprisoned: "c8a1217b8b02be95",
+  KDIsImprisoned: Object.freeze([
+    "c8a1217b8b02be95",
+    // KD 5.5.1 adds an exact player-entity branch. The commander shortcut
+    // rejects player-shaped entity lists before using this classifier.
+    "76a977ad75ef3b3a",
+  ]),
   KDIsTileDangerous: "243cf4c4cc9bcbb3",
   KinkyDungeonIsDisabled: "6ec1fc839a1da2c7",
   KDNearbyMapTiles: "696670b77b6d3ae6",
@@ -239,7 +264,11 @@ const KNOWN_FIND_MASTER_DEPENDENCY_SIGNATURES = Object.freeze({
   KDGetEnemyCache: "fa5be91665feb99d",
   KDHostile: "8f2d98727327166c",
   KDGetFaction: "cd2da5ae6e321bb8",
-  KDEnemyRank: "1cd726776d8cf2c7",
+  KDEnemyRank: Object.freeze([
+    "1cd726776d8cf2c7",
+    // KD 5.5.1 makes the unchanged rank lookup tolerate a missing Enemy.
+    "b3b6d4b842d42346",
+  ]),
   KDEntityHasFlag: "e30e401802a41161",
   KDEnemyHasFlag: "7d71636556aa98f8",
   KDCollHasFlag: "d28e4153bd7566cc",
@@ -257,6 +286,14 @@ const KNOWN_ENEMY_UPDATE_CACHE_DEPENDENCY_SIGNATURES = Object.freeze({
   KinkyDungeonSendEvent: "1664be6e63e383c2",
   KDCheckCollideableBullets: "d4e43b528965a6d9",
 });
+const KNOWN_ENEMY_UPDATE_CACHE_DEPENDENCY_NAMES = Object.freeze([
+  "KDMoveEntity",
+  "KDGetEnemyCache",
+  "KDGetEffectTiles",
+  "KinkyDungeonEntityAt",
+  "KinkyDungeonSendEvent",
+  "KDCheckCollideableBullets",
+]);
 const KNOWN_NEAREST_PLAYER_REORDER_SIGNATURES = Object.freeze({
   KDHostile: "8f2d98727327166c",
   KDGetFaction: "cd2da5ae6e321bb8",
@@ -279,6 +316,42 @@ const KNOWN_NEAREST_PLAYER_REORDER_SIGNATURES = Object.freeze({
   KDIsServant: "fe228618399b4a47",
   KDOpinionRepMod: "45dd66ba7071450f",
 });
+const KNOWN_NEAREST_PLAYER_REORDER_NAMES = Object.freeze([
+  "KDHostile",
+  "KDGetFaction",
+  "KDHelpless",
+  "KDIsImprisoned",
+  "KDUnPackEnemy",
+  "KDPackEnemy",
+  "KinkyDungeonGetEnemyByName",
+  "KinkyDungeonRefreshEnemiesCache",
+  "KDNPCStruggleThreshMult",
+  "KDEnemyRank",
+  "KDBoundEffects",
+  "KDGetBindEffectMult",
+  "KDEntityHasFlag",
+  "KDEnemyHasFlag",
+  "KDCollHasFlag",
+  "KDFactionHostile",
+  "KDFactionRelation",
+  "KDIsInParty",
+  "KDIsServant",
+  "KDOpinionRepMod",
+]);
+const KNOWN_FIND_MASTER_DEPENDENCY_NAMES = Object.freeze([
+  "KDGetEnemyCache",
+  "KDHostile",
+  "KDGetFaction",
+  "KDEnemyRank",
+  "KDEntityHasFlag",
+  "KDEnemyHasFlag",
+  "KDCollHasFlag",
+  "KDFactionHostile",
+  "KDFactionRelation",
+  "KDIsInParty",
+  "KDIsServant",
+  "KDistChebyshev",
+]);
 const KNOWN_JAIL_KEY_DEPENDENCY_SIGNATURES = Object.freeze({
   KinkyDungeonMapGet: "f64d2f67a4f11503",
   KinkyDungeonTilesGet: "75d2f29c2c97b968",
@@ -306,6 +379,60 @@ const COMMANDER_MUTATOR_NAMES = Object.freeze([
   "KinkyDungeonSendDialogue",
   "KinkyDungeonMakeNoiseSignal",
 ]);
+
+type FunctionDependency = readonly [string, Function];
+type KnownFunctionSignatureRecord = Readonly<
+  Record<string, string | readonly string[]>
+>;
+
+function functionDependenciesMatch(
+  dependencies: readonly FunctionDependency[],
+  expected: KnownFunctionSignatureRecord,
+): boolean {
+  try {
+    for (let index = 0; index < dependencies.length; index += 1) {
+      const dependency = dependencies[index];
+      if (dependency === undefined) return false;
+      const [name, functionValue] = dependency;
+      const expectedSignature = expected[name];
+      if (
+        expectedSignature === undefined ||
+        !matchesKnownFunctionSignature(
+          functionSignature(functionValue).normalizedHash,
+          expectedSignature,
+        )
+      ) {
+        return false;
+      }
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function functionDependenciesUnchanged(
+  target: Readonly<Record<string, unknown>>,
+  dependencies: readonly FunctionDependency[],
+): boolean {
+  for (let index = 0; index < dependencies.length; index += 1) {
+    const dependency = dependencies[index];
+    if (dependency === undefined || target[dependency[0]] !== dependency[1]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function allNativeFunctions(functions: readonly Function[]): boolean {
+  for (let index = 0; index < functions.length; index += 1) {
+    const functionValue = functions[index];
+    if (functionValue === undefined || !isNativeFunction(functionValue)) {
+      return false;
+    }
+  }
+  return true;
+}
 
 declare const KDMapData: KDMapDataLike | undefined;
 declare const KinkyDungeonVisionGet:
@@ -606,6 +733,7 @@ export interface KDFindMasterResult {
 }
 
 export interface KDCommanderEntity extends KDNearbyEnemy {
+  readonly player?: unknown;
   readonly Enemy?: {
     readonly tags?: {
       readonly nohelp?: unknown;
@@ -1632,9 +1760,6 @@ export function createKDEnemySelectorHandler(
               ) {
                 const weightedEnemy = cachedQuery.enemyWeights[weightIndex]!;
                 if (selection > weightedEnemy.weight) {
-                  if (weightedEnemy.enemy.name == "Mimic") {
-                    console.log("Mimic says boo");
-                  }
                   return weightedEnemy.enemy;
                 }
               }
@@ -1876,9 +2001,6 @@ export function createKDEnemySelectorHandler(
       ) {
         const weightedEnemy = enemyWeights[weightIndex]!;
         if (selection > weightedEnemy.weight) {
-          if (weightedEnemy.enemy.name == "Mimic") {
-            console.log("Mimic says boo");
-          }
           return weightedEnemy.enemy;
         }
       }
@@ -3652,6 +3774,9 @@ export function createKDCommanderHelpShortcutHandler(
     if (active || !(Number(data?.delta) > 0) || !environment.compatible()) {
       return useJavaScriptFallback();
     }
+    if (commanderMapRequiresOfficialPlayerHandling(environment)) {
+      return useJavaScriptFallback();
+    }
 
     const orders = environment.orders();
     const struggleOrder = orders?.helpStruggle;
@@ -3753,7 +3878,11 @@ export function createKDCommanderHelpShortcutHandler(
     ): unknown {
       if (dirty && !shortcutDisabled) {
         try {
+          if (commanderMapRequiresOfficialPlayerHandling(environment)) {
+            shortcutDisabled = true;
+          }
           if (
+            !shortcutDisabled &&
             !environment.candidateMayNeedHelp(
               filterArgs[0] as KDCommanderEntity,
             )
@@ -3779,7 +3908,11 @@ export function createKDCommanderHelpShortcutHandler(
     ): unknown {
       if (dirty && !shortcutDisabled) {
         try {
+          if (commanderMapRequiresOfficialPlayerHandling(environment)) {
+            shortcutDisabled = true;
+          }
           if (
+            !shortcutDisabled &&
             !environment.candidateMayNeedHelp(
               filterArgs[0] as KDCommanderEntity,
             )
@@ -3838,6 +3971,39 @@ export function createKDCommanderHelpShortcutHandler(
       }
     }
   };
+}
+
+function commanderMapRequiresOfficialPlayerHandling(
+  environment: KDCommanderHelpEnvironment,
+): boolean {
+  if (
+    Object.getOwnPropertyDescriptor !==
+      KD_OBJECT_GET_OWN_PROPERTY_DESCRIPTOR ||
+    Object.getPrototypeOf !== KD_OBJECT_GET_PROTOTYPE_OF
+  ) {
+    return true;
+  }
+  const entities = environment.mapData()?.Entities;
+  if (entities === undefined) return false;
+  for (const entity of entities) {
+    try {
+      let owner: object | null = entity;
+      while (owner !== null) {
+        const descriptor = KD_OBJECT_GET_OWN_PROPERTY_DESCRIPTOR(
+          owner,
+          "player",
+        );
+        if (descriptor !== undefined) {
+          if (!("value" in descriptor) || descriptor.value) return true;
+          break;
+        }
+        owner = KD_OBJECT_GET_PROTOTYPE_OF(owner) as object | null;
+      }
+    } catch {
+      return true;
+    }
+  }
+  return false;
 }
 
 export function installKDCommanderHelpShortcutAdapter(
@@ -4688,16 +4854,6 @@ function plainBonusTags(value: unknown): boolean {
   }
 }
 
-function nativeBuiltin(functionValue: Function): boolean {
-  try {
-    return Function.prototype.toString
-      .call(functionValue)
-      .includes("[native code]");
-  } catch {
-    return false;
-  }
-}
-
 let browserTileAliases:
   | {
       readonly smartEnemy: string | undefined;
@@ -5100,22 +5256,31 @@ function createBrowserEnemyUpdateCacheEnvironment(): KDEnemyUpdateCacheEnvironme
     () => KDGetEnemyCache,
     "KDGetEnemyCache",
   );
-  const dependencies = new Map<string, Function>();
-  for (const name of Object.keys(
-    KNOWN_ENEMY_UPDATE_CACHE_DEPENDENCY_SIGNATURES,
-  )) {
+  const dependencies: FunctionDependency[] = [];
+  for (
+    let nameIndex = 0;
+    nameIndex < KNOWN_ENEMY_UPDATE_CACHE_DEPENDENCY_NAMES.length;
+    nameIndex += 1
+  ) {
+    const name = KNOWN_ENEMY_UPDATE_CACHE_DEPENDENCY_NAMES[nameIndex];
+    if (name === undefined) {
+      throw new TypeError("Enemy-update dependency name is unavailable");
+    }
     const functionValue = target[name];
     if (typeof functionValue !== "function") {
       throw new TypeError(`${name} is unavailable`);
     }
-    dependencies.set(name, functionValue);
+    dependencies[dependencies.length] = [name, functionValue];
   }
-  const signaturesMatch = [...dependencies].every(
-    ([name, functionValue]) =>
-      functionSignature(functionValue).normalizedHash ===
-      KNOWN_ENEMY_UPDATE_CACHE_DEPENDENCY_SIGNATURES[
-        name as keyof typeof KNOWN_ENEMY_UPDATE_CACHE_DEPENDENCY_SIGNATURES
-      ],
+  const expectedArrayIterator = Array.prototype[Symbol.iterator];
+  const expectedArrayPush = Array.prototype.push;
+  const arrayIntrinsicsMatch = allNativeFunctions([
+    expectedArrayIterator,
+    expectedArrayPush,
+  ]);
+  const signaturesMatch = functionDependenciesMatch(
+    dependencies,
+    KNOWN_ENEMY_UPDATE_CACHE_DEPENDENCY_SIGNATURES,
   );
   const nonEnemyEventMaps = [
     {
@@ -5185,9 +5350,10 @@ function createBrowserEnemyUpdateCacheEnvironment(): KDEnemyUpdateCacheEnvironme
       try {
         return (
           signaturesMatch &&
-          [...dependencies].every(
-            ([name, functionValue]) => target[name] === functionValue,
-          ) &&
+          arrayIntrinsicsMatch &&
+          Array.prototype[Symbol.iterator] === expectedArrayIterator &&
+          Array.prototype.push === expectedArrayPush &&
+          functionDependenciesUnchanged(target, dependencies) &&
           eventTableRiskReasons().length === 0
         );
       } catch {
@@ -5278,7 +5444,7 @@ function createBrowserEnemyUpdateCacheEnvironment(): KDEnemyUpdateCacheEnvironme
 
 function createBrowserJailKeyEarlyReturnEnvironment(): KDJailKeyEarlyReturnEnvironment {
   const target = globalThis as Record<string, unknown>;
-  const dependencies = new Map<string, Function>([
+  const dependencies: FunctionDependency[] = [
     [
       "KinkyDungeonMapGet",
       readRequiredFunction(() => KinkyDungeonMapGet, "KinkyDungeonMapGet"),
@@ -5291,21 +5457,20 @@ function createBrowserJailKeyEarlyReturnEnvironment(): KDJailKeyEarlyReturnEnvir
       "KDistChebyshev",
       readRequiredFunction(() => KDistChebyshev, "KDistChebyshev"),
     ],
-  ]);
-  const signaturesMatch = [...dependencies].every(
-    ([name, functionValue]) =>
-      functionSignature(functionValue).normalizedHash ===
-      KNOWN_JAIL_KEY_DEPENDENCY_SIGNATURES[
-        name as keyof typeof KNOWN_JAIL_KEY_DEPENDENCY_SIGNATURES
-      ],
+  ];
+  const signaturesMatch = functionDependenciesMatch(
+    dependencies,
+    KNOWN_JAIL_KEY_DEPENDENCY_SIGNATURES,
   );
+  const expectedArrayIterator = Array.prototype[Symbol.iterator];
+  const arrayIteratorMatches = isNativeFunction(expectedArrayIterator);
 
   return Object.freeze({
     compatible: () =>
       signaturesMatch &&
-      [...dependencies].every(
-        ([name, functionValue]) => target[name] === functionValue,
-      ),
+      arrayIteratorMatches &&
+      Array.prototype[Symbol.iterator] === expectedArrayIterator &&
+      functionDependenciesUnchanged(target, dependencies),
     groundItems: () => {
       const mapData = readBinding(() => KDMapData, "KDMapData") as
         | {
@@ -5356,22 +5521,30 @@ function createBrowserEnemySelectorEnvironment(
   }
 
   const expectedMapGet = Map.prototype.get;
+  const expectedArrayIsArray = Array.isArray;
+  const expectedArrayIterator = Array.prototype[Symbol.iterator];
   const expectedArrayIncludes = Array.prototype.includes;
+  const expectedArrayPush = Array.prototype.push;
   const expectedStringIncludes = String.prototype.includes;
+  const expectedObjectAssign = Object.assign;
   const expectedObjectEntries = Object.entries;
   const expectedObjectGetPrototypeOf = Object.getPrototypeOf;
   const expectedObjectKeys = Object.keys;
   const expectedObjectGetOwnPropertyDescriptor =
     Object.getOwnPropertyDescriptor;
-  const nativeBuiltins = [
+  const nativeBuiltins = allNativeFunctions([
     expectedMapGet,
+    expectedArrayIsArray,
+    expectedArrayIterator,
     expectedArrayIncludes,
+    expectedArrayPush,
     expectedStringIncludes,
+    expectedObjectAssign,
     expectedObjectEntries,
     expectedObjectGetPrototypeOf,
     expectedObjectKeys,
     expectedObjectGetOwnPropertyDescriptor,
-  ].every(nativeBuiltin);
+  ]);
   const factionRelationMatches =
     functionSignature(expectedFactionRelation).normalizedHash ===
     KNOWN_FIND_MASTER_DEPENDENCY_SIGNATURES.KDFactionRelation;
@@ -5460,8 +5633,12 @@ function createBrowserEnemySelectorEnvironment(
         state.factionRelation === expectedFactionRelation &&
         state.statsChoice.get === expectedMapGet &&
         Map.prototype.get === expectedMapGet &&
+        Array.isArray === expectedArrayIsArray &&
+        Array.prototype[Symbol.iterator] === expectedArrayIterator &&
         Array.prototype.includes === expectedArrayIncludes &&
+        Array.prototype.push === expectedArrayPush &&
         String.prototype.includes === expectedStringIncludes &&
+        Object.assign === expectedObjectAssign &&
         Object.entries === expectedObjectEntries &&
         Object.getPrototypeOf === expectedObjectGetPrototypeOf &&
         Object.keys === expectedObjectKeys &&
@@ -5558,6 +5735,20 @@ function createBrowserNearbyEnvironment(): KDNearbyEnemiesEnvironment {
   if (typeof hostile !== "function") {
     throw new TypeError("KDHostile is unavailable");
   }
+  const dependencies: FunctionDependency[] = [
+    ["KDGetEnemyCache", enemyCache],
+    ["KDHostile", hostile],
+  ];
+  const signaturesMatch = functionDependenciesMatch(
+    dependencies,
+    KNOWN_FIND_MASTER_DEPENDENCY_SIGNATURES,
+  );
+  const expectedArrayIterator = Array.prototype[Symbol.iterator];
+  const expectedArrayPush = Array.prototype.push;
+  const arrayIntrinsicsMatch = allNativeFunctions([
+    expectedArrayIterator,
+    expectedArrayPush,
+  ]);
   return Object.freeze({
     // KDMapData is a top-level lexical binding in KD 5.4.92, not a property on
     // globalThis. Keep the guarded lexical read even though the callable
@@ -5576,7 +5767,11 @@ function createBrowserNearbyEnvironment(): KDNearbyEnemiesEnvironment {
       target: unknown,
     ) => boolean,
     compatible: () =>
-      target.KDGetEnemyCache === enemyCache && target.KDHostile === hostile,
+      signaturesMatch &&
+      arrayIntrinsicsMatch &&
+      Array.prototype[Symbol.iterator] === expectedArrayIterator &&
+      Array.prototype.push === expectedArrayPush &&
+      functionDependenciesUnchanged(target, dependencies),
   });
 }
 
@@ -5597,21 +5792,28 @@ function createBrowserFindMasterEnvironment(): KDFindMasterEnvironment {
     () => KDistChebyshev,
     "KDistChebyshev",
   );
-  const dependencies = new Map<string, Function>();
-  for (const name of Object.keys(KNOWN_FIND_MASTER_DEPENDENCY_SIGNATURES)) {
+  const dependencies: FunctionDependency[] = [];
+  for (
+    let nameIndex = 0;
+    nameIndex < KNOWN_FIND_MASTER_DEPENDENCY_NAMES.length;
+    nameIndex += 1
+  ) {
+    const name = KNOWN_FIND_MASTER_DEPENDENCY_NAMES[nameIndex];
+    if (name === undefined) {
+      throw new TypeError("Find-master dependency name is unavailable");
+    }
     const functionValue = target[name];
     if (typeof functionValue !== "function") {
       throw new TypeError(`${name} is unavailable`);
     }
-    dependencies.set(name, functionValue);
+    dependencies[dependencies.length] = [name, functionValue];
   }
-  const signaturesMatch = [...dependencies].every(
-    ([name, functionValue]) =>
-      functionSignature(functionValue).normalizedHash ===
-      KNOWN_FIND_MASTER_DEPENDENCY_SIGNATURES[
-        name as keyof typeof KNOWN_FIND_MASTER_DEPENDENCY_SIGNATURES
-      ],
+  const signaturesMatch = functionDependenciesMatch(
+    dependencies,
+    KNOWN_FIND_MASTER_DEPENDENCY_SIGNATURES,
   );
+  const expectedArrayIterator = Array.prototype[Symbol.iterator];
+  const arrayIteratorMatches = isNativeFunction(expectedArrayIterator);
 
   return Object.freeze({
     mapData: () => KDMapData,
@@ -5640,9 +5842,9 @@ function createBrowserFindMasterEnvironment(): KDFindMasterEnvironment {
     chebyshev: chebyshev.bind(globalThis) as (x: number, y: number) => number,
     compatible: () =>
       signaturesMatch &&
-      [...dependencies].every(
-        ([name, functionValue]) => target[name] === functionValue,
-      ),
+      arrayIteratorMatches &&
+      Array.prototype[Symbol.iterator] === expectedArrayIterator &&
+      functionDependenciesUnchanged(target, dependencies),
   });
 }
 
@@ -5702,15 +5904,27 @@ function createBrowserNearestPlayerEnvironment(): KDNearestPlayerEnvironment {
     "KinkyDungeonGetEnemyByName",
   );
 
-  const dependencies = new Map<string, Function>();
-  for (const name of Object.keys(KNOWN_NEAREST_PLAYER_REORDER_SIGNATURES)) {
+  const dependencies: FunctionDependency[] = [];
+  for (
+    let nameIndex = 0;
+    nameIndex < KNOWN_NEAREST_PLAYER_REORDER_NAMES.length;
+    nameIndex += 1
+  ) {
+    const name = KNOWN_NEAREST_PLAYER_REORDER_NAMES[nameIndex];
+    if (name === undefined) {
+      throw new TypeError("Nearest-player dependency name is unavailable");
+    }
     const functionValue = target[name];
     if (typeof functionValue !== "function") {
       throw new TypeError(`${name} is unavailable`);
     }
-    dependencies.set(name, functionValue);
+    dependencies[dependencies.length] = [name, functionValue];
   }
-  for (const [name, functionValue] of [
+  const signaturesMatch = functionDependenciesMatch(
+    dependencies,
+    KNOWN_NEAREST_PLAYER_REORDER_SIGNATURES,
+  );
+  const additionalDependencies: readonly FunctionDependency[] = [
     ["KDEnemyVisionRadius", enemyVisionRadius],
     ["KinkyDungeonCheckLOS", checkLOS],
     ["KinkyDungeonCheckPath", checkPath],
@@ -5720,25 +5934,29 @@ function createBrowserNearestPlayerEnvironment(): KDNearestPlayerEnvironment {
     ["KDAllied", allied],
     ["KinkyDungeonJailGuard", jailGuard],
     ["KinkyDungeonSetFlag", setFlag],
-  ] as const) {
-    dependencies.set(name, functionValue);
+  ];
+  for (
+    let dependencyIndex = 0;
+    dependencyIndex < additionalDependencies.length;
+    dependencyIndex += 1
+  ) {
+    const dependency = additionalDependencies[dependencyIndex];
+    if (dependency === undefined) {
+      throw new TypeError("Nearest-player dependency is unavailable");
+    }
+    dependencies[dependencies.length] = dependency;
   }
-  const signaturesMatch = Object.entries(
-    KNOWN_NEAREST_PLAYER_REORDER_SIGNATURES,
-  ).every(
-    ([name, expected]) =>
-      functionSignature(dependencies.get(name)!).normalizedHash === expected,
-  );
+  const expectedArrayIterator = Array.prototype[Symbol.iterator];
+  const arrayIteratorMatches = isNativeFunction(expectedArrayIterator);
   const compatible = (): boolean => {
-    if (!signaturesMatch) {
+    if (
+      !signaturesMatch ||
+      !arrayIteratorMatches ||
+      Array.prototype[Symbol.iterator] !== expectedArrayIterator
+    ) {
       return false;
     }
-    for (const [name, functionValue] of dependencies) {
-      if (target[name] !== functionValue) {
-        return false;
-      }
-    }
-    return true;
+    return functionDependenciesUnchanged(target, dependencies);
   };
 
   return Object.freeze({
@@ -5826,7 +6044,7 @@ function createBrowserCommanderHelpEnvironment(): KDCommanderHelpEnvironment {
     throw new TypeError("KDCommanderOrders is unavailable");
   }
 
-  const classifiers = new Map<string, Function>([
+  const classifiers: FunctionDependency[] = [
     ["KDBoundEffects", boundEffects],
     ["KDIsImprisoned", imprisoned],
     ["KDIsTileDangerous", tileDangerous],
@@ -5835,22 +6053,45 @@ function createBrowserCommanderHelpEnvironment(): KDCommanderHelpEnvironment {
     ["KinkyDungeonEntityAt", entityAt],
     ["KDIsHumanoid", humanoid],
     ["KDIsImmobile", immobile],
-  ]);
-  const classifierSignaturesMatch = [...classifiers].every(
-    ([name, functionValue]) =>
-      functionSignature(functionValue).normalizedHash ===
-      KNOWN_COMMANDER_CLASSIFIER_SIGNATURES[
-        name as keyof typeof KNOWN_COMMANDER_CLASSIFIER_SIGNATURES
-      ],
+  ];
+  const classifierSignaturesMatch = functionDependenciesMatch(
+    classifiers,
+    KNOWN_COMMANDER_CLASSIFIER_SIGNATURES,
   );
-  const orderFingerprintMatches =
-    commanderOrderFingerprint(orders) === KNOWN_COMMANDER_ORDER_FINGERPRINT;
+  const orderFingerprintMatches = matchesKnownFunctionSignature(
+    commanderOrderFingerprint(orders),
+    KNOWN_COMMANDER_ORDER_FINGERPRINTS,
+  );
+  const expectedArrayIterator = Array.prototype[Symbol.iterator];
+  const expectedArrayMap = Array.prototype.map;
+  const expectedArraySome = Array.prototype.some;
+  const expectedStringIncludes = String.prototype.includes;
+  const expectedObjectEntries = Object.entries;
+  const expectedObjectKeys = Object.keys;
+  const expectedMapGet = Map.prototype.get;
+  const expectedMap = Map;
+  const commanderBuiltins = allNativeFunctions([
+    expectedArrayIterator,
+    expectedArrayMap,
+    expectedArraySome,
+    expectedStringIncludes,
+    expectedObjectEntries,
+    expectedObjectKeys,
+    expectedMapGet,
+    expectedMap,
+  ]);
   const orderSnapshot = snapshotCommanderOrders(orders);
-  const mutators = new Map<string, (...args: unknown[]) => unknown>();
-  for (const name of COMMANDER_MUTATOR_NAMES) {
+  const mutators: FunctionDependency[] = [];
+  for (
+    let nameIndex = 0;
+    nameIndex < COMMANDER_MUTATOR_NAMES.length;
+    nameIndex += 1
+  ) {
+    const name = COMMANDER_MUTATOR_NAMES[nameIndex];
+    if (name === undefined) continue;
     const functionValue = target[name];
     if (typeof functionValue === "function") {
-      mutators.set(name, functionValue as (...args: unknown[]) => unknown);
+      mutators[mutators.length] = [name, functionValue];
     }
   }
 
@@ -5862,22 +6103,22 @@ function createBrowserCommanderHelpEnvironment(): KDCommanderHelpEnvironment {
     if (
       !classifierSignaturesMatch ||
       !orderFingerprintMatches ||
+      !commanderBuiltins ||
+      Array.prototype[Symbol.iterator] !== expectedArrayIterator ||
+      Array.prototype.map !== expectedArrayMap ||
+      Array.prototype.some !== expectedArraySome ||
+      String.prototype.includes !== expectedStringIncludes ||
+      Object.entries !== expectedObjectEntries ||
+      Object.keys !== expectedObjectKeys ||
+      Map.prototype.get !== expectedMapGet ||
+      Map !== expectedMap ||
       currentOrders !== orders ||
       !commanderOrderSnapshotMatches(orders, orderSnapshot)
     ) {
       return false;
     }
-    for (const [name, expected] of classifiers) {
-      if (target[name] !== expected) {
-        return false;
-      }
-    }
-    for (const [name, expected] of mutators) {
-      if (target[name] !== expected) {
-        return false;
-      }
-    }
-    return true;
+    if (!functionDependenciesUnchanged(target, classifiers)) return false;
+    return functionDependenciesUnchanged(target, mutators);
   };
 
   return Object.freeze({
@@ -5953,7 +6194,11 @@ function createBrowserCommanderHelpEnvironment(): KDCommanderHelpEnvironment {
           if (target[name] !== wrapper) {
             throw new TypeError(`Could not observe ${name}`);
           }
-          installed.push({ name, original, wrapper });
+          installed.push({
+            name,
+            original: original as (...args: unknown[]) => unknown,
+            wrapper,
+          });
         }
       } catch {
         restoreMutators();

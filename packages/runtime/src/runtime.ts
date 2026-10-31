@@ -1,9 +1,6 @@
 import { WasmBatchBridge, type WasmBindings } from "./bridge.js";
 import { ABI_VERSION } from "./codec.js";
-import {
-  exportDiagnosticJson,
-  type DiagnosticMod,
-} from "./diagnostics.js";
+import { exportDiagnosticJson, type DiagnosticMod } from "./diagnostics.js";
 import { LegacySystemDispatcher } from "./dispatcher.js";
 import { CapabilityPluginHost } from "./plugins.js";
 import {
@@ -24,9 +21,15 @@ import type {
   WasmPluginHandle,
   WasmPluginManifest,
 } from "./types.js";
-import { KNOWN_UPSTREAM, UPSTREAM_5_4_92_FACADES } from "./upstream.js";
+import {
+  findKnownFacade,
+  findKnownFacadeForRelease,
+  findKnownUpstreamRelease,
+  identifyKnownUpstreamRelease,
+  type KnownUpstreamRelease,
+} from "./upstream.js";
 
-export const VERSION = "0.1.2";
+export const VERSION = "0.1.5-rc.1";
 
 export interface RuntimeOptions {
   readonly target?: Record<string, unknown>;
@@ -70,6 +73,7 @@ export class KDHybridRuntime {
   readonly quality: AdaptiveQualityController;
   readonly plugins = new CapabilityPluginHost();
   readonly #options: RuntimeOptions;
+  readonly #knownRelease: KnownUpstreamRelease | undefined;
   readonly #registeredGlobals = new Set<string>();
   #initialized = false;
   #api: KDHybridPublicApi | null = null;
@@ -77,6 +81,9 @@ export class KDHybridRuntime {
 
   constructor(options: RuntimeOptions = {}) {
     this.#options = options;
+    // Resolve the exact release before the first facade replaces a fingerprint
+    // global. Cache unknown as well so a later mutation cannot become trusted.
+    this.#knownRelease = resolveKnownRelease(options);
     this.dispatcher = new LegacySystemDispatcher(
       options.target ?? (globalThis as Record<string, unknown>),
     );
@@ -119,20 +126,18 @@ export class KDHybridRuntime {
     handler: (...args: unknown[]) => unknown,
     options: KnownAdapterOptions = {},
   ): SystemStatus {
-    const facade = UPSTREAM_5_4_92_FACADES.find(
-      (candidate) => candidate.globalName === globalName,
-    );
-    if (facade === undefined) {
+    const knownFacade = findKnownFacade(globalName);
+    if (knownFacade === undefined) {
       throw new Error(`No known KD facade metadata for ${globalName}`);
     }
-    const exactBundle =
-      this.#options.upstreamBundleSha256 === undefined ||
-      this.#options.upstreamBundleSha256.toLowerCase() ===
-        KNOWN_UPSTREAM.bundleSha256;
+    const exactFacade =
+      this.#knownRelease === undefined
+        ? undefined
+        : findKnownFacadeForRelease(this.#knownRelease, globalName);
     return this.registerAdapter({
-      system: facade.system,
+      system: knownFacade.system,
       globalName,
-      candidates: exactBundle ? facade.candidates : [],
+      candidates: exactFacade?.candidates ?? [],
       handler,
       ...(options.directOfficialArity === undefined
         ? {}
@@ -248,6 +253,31 @@ export class KDHybridRuntime {
     this.#api = null;
     this.#initialized = false;
   }
+}
+
+function resolveKnownRelease(
+  options: RuntimeOptions,
+): KnownUpstreamRelease | undefined {
+  if (options.upstreamBundleSha256 !== undefined) {
+    const release = findKnownUpstreamRelease(options.upstreamBundleSha256);
+    if (
+      release === undefined ||
+      (options.upstreamVersion !== undefined &&
+        options.upstreamVersion !== release.gameVersion) ||
+      (options.upstreamPackageVersion !== undefined &&
+        options.upstreamPackageVersion !== release.packageVersion)
+    ) {
+      return undefined;
+    }
+    return release;
+  }
+  // A normal KD mod cannot read the installed bundle bytes. Identify the exact
+  // release from a multi-function fingerprint; every adapter then still has
+  // its own structural and dependency gates. The menu/localization version is
+  // diagnostic only and is deliberately not trusted for release selection.
+  return identifyKnownUpstreamRelease(
+    options.target ?? (globalThis as Record<string, unknown>),
+  );
 }
 
 function defaultEnvironment(): QualityEnvironment {

@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(KDHybridManager VERSION 0.1.2 LANGUAGES CXX)
+project(KDHybridManager VERSION 0.1.5 LANGUAGES CXX)
+set(KD_MANAGER_RELEASE_VERSION "0.1.5-rc.1")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -13,6 +14,11 @@ find_package(Qt6 6.2 REQUIRED COMPONENTS Core Widgets)
 set(KD_REPOSITORY_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
 set(KD_BOOTSTRAP_ROOT "${KD_REPOSITORY_ROOT}/dist/bootstrap")
 set(KD_BOOTSTRAP_FILES
+    "${KD_BOOTSTRAP_ROOT}/source/MPL-2.0/packages/tools/src/kd-source-patch-5-5-6-v2.ts"
+    "${KD_BOOTSTRAP_ROOT}/source/MPL-2.0/upstream-patches/kd-5.5.6/bundle-optimizations-v2.patch"
+    "${KD_BOOTSTRAP_ROOT}/source/MPL-2.0/packages/tools/src/kd-source-patch-5-5-6-v1.ts"
+    "${KD_BOOTSTRAP_ROOT}/source/MPL-2.0/upstream-patches/kd-5.5.6/README.md"
+    "${KD_BOOTSTRAP_ROOT}/source/MPL-2.0/upstream-patches/kd-5.5.6/bundle-optimizations-v1.patch"
     "${KD_BOOTSTRAP_ROOT}/KDHybridBridge.zip"
     "${KD_BOOTSTRAP_ROOT}/kd-hybrid-bootstrap.js"
     "${KD_BOOTSTRAP_ROOT}/kd-hybrid-bootstrap.js.map"
@@ -21,16 +27,27 @@ set(KD_BOOTSTRAP_FILES
     "${KD_BOOTSTRAP_ROOT}/version.json"
     "${KD_BOOTSTRAP_ROOT}/LICENSES/ACORN-MIT.txt"
     "${KD_BOOTSTRAP_ROOT}/LICENSES/MIT.txt"
+    "${KD_BOOTSTRAP_ROOT}/LICENSES/PIXI-FILTERS-MIT.txt"
     "${KD_BOOTSTRAP_ROOT}/LICENSES/MPL-2.0.txt"
     "${KD_BOOTSTRAP_ROOT}/source/MPL-2.0/crates/kd-core/src/pathfinding.rs"
     "${KD_BOOTSTRAP_ROOT}/source/MPL-2.0/packages/bootstrap/src/kd-adapters.ts"
     "${KD_BOOTSTRAP_ROOT}/source/MPL-2.0/packages/tools/src/kd-source-patches.ts"
     "${KD_BOOTSTRAP_ROOT}/source/MPL-2.0/packages/tools/src/kd-source-patch-v6.ts"
+    "${KD_BOOTSTRAP_ROOT}/source/MPL-2.0/packages/tools/src/kd-source-patch-v7.ts"
+    "${KD_BOOTSTRAP_ROOT}/source/MPL-2.0/packages/tools/src/kd-source-patch-5-5-v1.ts"
     "${KD_BOOTSTRAP_ROOT}/source/MPL-2.0/native/manager/src/SourcePatches.h"
     "${KD_BOOTSTRAP_ROOT}/source/MPL-2.0/native/manager/src/SourcePatches.cpp"
     "${KD_BOOTSTRAP_ROOT}/source/MPL-2.0/upstream-patches/kd-5.4.92/README.md"
     "${KD_BOOTSTRAP_ROOT}/source/MPL-2.0/upstream-patches/kd-5.4.92/source-optimizations-v6.patch"
     "${KD_BOOTSTRAP_ROOT}/source/MPL-2.0/upstream-patches/kd-5.4.92/bundle-optimizations-v6.patch"
+    "${KD_BOOTSTRAP_ROOT}/source/MPL-2.0/upstream-patches/kd-5.4.92/source-optimizations-v7.patch"
+    "${KD_BOOTSTRAP_ROOT}/source/MPL-2.0/upstream-patches/kd-5.4.92/bundle-optimizations-v7.patch"
+    "${KD_BOOTSTRAP_ROOT}/source/MPL-2.0/upstream-patches/kd-5.5.1/README.md"
+    "${KD_BOOTSTRAP_ROOT}/source/MPL-2.0/upstream-patches/kd-5.5.1/source-optimizations-v1.patch"
+    "${KD_BOOTSTRAP_ROOT}/source/MPL-2.0/upstream-patches/kd-5.5.1/bundle-optimizations-v1.patch"
+    "${KD_BOOTSTRAP_ROOT}/source/MIT/packages/tools/src/pixi-filters-patch-v1.ts"
+    "${KD_BOOTSTRAP_ROOT}/source/MIT/upstream-patches/pixi-filters-5.2.0/README.md"
+    "${KD_BOOTSTRAP_ROOT}/source/MIT/upstream-patches/pixi-filters-5.2.0/compatibility-v1.patch"
     "${KD_BOOTSTRAP_ROOT}/wasm/kd_hybrid_core.js"
     "${KD_BOOTSTRAP_ROOT}/wasm/kd_hybrid_core_bg.wasm"
 )
@@ -50,7 +67,7 @@ add_library(kd_manager_core
 )
 target_link_libraries(kd_manager_core PUBLIC Qt6::Core)
 target_compile_definitions(kd_manager_core
-    PUBLIC KD_MANAGER_VERSION="${PROJECT_VERSION}")
+    PUBLIC KD_MANAGER_VERSION="${KD_MANAGER_RELEASE_VERSION}")
 target_include_directories(kd_manager_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
 qt_add_resources(kd_manager_core "bootstrap_payload"
@@ -92,8 +109,10 @@ endif()
 include(CTest)
 if(BUILD_TESTING)
     find_package(Qt6 6.2 REQUIRED COMPONENTS Test)
+    target_compile_definitions(kd_manager_core PRIVATE KD_SOURCE_PATCH_TESTING)
     add_executable(kd_manager_tests tests/PatcherTests.cpp)
     target_link_libraries(kd_manager_tests PRIVATE kd_manager_core Qt6::Test)
+    target_compile_definitions(kd_manager_tests PRIVATE KD_SOURCE_PATCH_TESTING)
     add_test(NAME kd_manager_tests COMMAND kd_manager_tests)
 endif()
 

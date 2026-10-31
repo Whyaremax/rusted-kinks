@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { KNOWN_UPSTREAM } from "@kd-hybrid/runtime";
+import {
+  KNOWN_UPSTREAM,
+  KNOWN_UPSTREAM_5_5_1
+} from "@kd-hybrid/runtime";
 
 import { installKinkyDungeonFramePacing } from "./frame-pacing.js";
 
@@ -197,6 +200,49 @@ describe("Kinky Dungeon GPU frame pacing", () => {
     });
   });
 
+  it("supports the exact 5.5.1 release and preserves non-stage renders", () => {
+    let time = 0;
+    const stage = {};
+    const renderTexture = {};
+    const official = vi.fn((displayObject: unknown) => displayObject);
+    const renderer = { render: official };
+    const target = {
+      PIXI: { VERSION: "7.2.1" },
+      PIXIapp: { renderer, stage },
+      KDHybridRuntimeControl: {}
+    };
+    const pacing = installKinkyDungeonFramePacing(
+      {
+        upstreamVersion: KNOWN_UPSTREAM_5_5_1.gameVersion,
+        upstreamBundleSha256:
+          KNOWN_UPSTREAM_5_5_1.bundleSha256.toUpperCase(),
+        mode: "adaptive",
+        activeWindowMs: 0,
+        idleIntervalMs: 15,
+        now: () => time,
+        isVisible: () => true,
+        hasFocus: () => true
+      },
+      target
+    );
+
+    expect(renderer.render(stage)).toBe(stage);
+    time = 1;
+    expect(renderer.render(stage)).toBeUndefined();
+    expect(renderer.render(renderTexture)).toBe(renderTexture);
+    expect(pacing.status()).toMatchObject({
+      compatible: true,
+      compatibilityReason: "exact-kd-bundle-pixi-match",
+      installed: true,
+      renderedStageCalls: 1,
+      skippedStageCalls: 1,
+      otherRenderCalls: 1
+    });
+
+    pacing.dispose();
+    expect(renderer.render).toBe(official);
+  });
+
   it("fails closed on unknown KD or Pixi builds", () => {
     const renderer = { render: vi.fn() };
     const stage = {};
@@ -218,6 +264,60 @@ describe("Kinky Dungeon GPU frame pacing", () => {
       compatible: false,
       installed: false,
       compatibilityReason: "unsupported-pixi-version:8.0.0"
+    });
+  });
+
+  it.each([
+    {
+      name: "missing game version",
+      options: {
+        upstreamBundleSha256: KNOWN_UPSTREAM.bundleSha256
+      },
+      reason: "unsupported-kd-version:unknown"
+    },
+    {
+      name: "missing bundle hash",
+      options: {
+        upstreamVersion: KNOWN_UPSTREAM.gameVersion
+      },
+      reason: "unsupported-kd-bundle:unknown"
+    },
+    {
+      name: "unknown bundle hash",
+      options: {
+        upstreamVersion: KNOWN_UPSTREAM.gameVersion,
+        upstreamBundleSha256: "different"
+      },
+      reason: "unsupported-kd-bundle:different"
+    },
+    {
+      name: "cross-paired release metadata",
+      options: {
+        upstreamVersion: KNOWN_UPSTREAM_5_5_1.gameVersion,
+        upstreamBundleSha256: KNOWN_UPSTREAM.bundleSha256
+      },
+      reason: `mismatched-kd-release:${KNOWN_UPSTREAM_5_5_1.gameVersion}:${KNOWN_UPSTREAM.bundleSha256}`
+    }
+  ])("fails closed on $name", ({ options, reason }) => {
+    const official = vi.fn();
+    const renderer = { render: official };
+    const target = {
+      PIXI: { VERSION: "7.2.1" },
+      PIXIapp: { renderer, stage: {} }
+    };
+    const pacing = installKinkyDungeonFramePacing(
+      {
+        ...options,
+        mode: "adaptive"
+      },
+      target
+    );
+
+    expect(renderer.render).toBe(official);
+    expect(pacing.status()).toMatchObject({
+      compatible: false,
+      installed: false,
+      compatibilityReason: reason
     });
   });
 

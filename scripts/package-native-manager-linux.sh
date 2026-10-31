@@ -32,6 +32,8 @@ cp "$repo_root/native/manager/assets/kd-hybrid-manager.svg" \
 cp "$repo_root/LICENSE" "$appdir/usr/share/licenses/KD-Hybrid-MIT.txt"
 cp "$repo_root/LICENSES/ACORN-MIT.txt" \
   "$appdir/usr/share/licenses/ACORN-MIT.txt"
+cp "$repo_root/LICENSES/PIXI-FILTERS-MIT.txt" \
+  "$appdir/usr/share/licenses/PIXI-FILTERS-MIT.txt"
 cp "$repo_root/LICENSES/MPL-2.0.txt" \
   "$appdir/usr/share/licenses/MPL-2.0.txt"
 cp "$repo_root/LICENSES/LGPL-3.0.txt" \
@@ -42,7 +44,7 @@ cp "$repo_root/native/manager/THIRD_PARTY.md" \
 printf '%s\n' \
   "Qt source code and licensing information: https://www.qt.io/download-open-source" \
   > "$appdir/usr/share/licenses/Qt-Source-Offer.txt"
-cp -R "$repo_root/dist/bootstrap/source/MPL-2.0" \
+cp -R "$repo_root/dist/bootstrap/source/." \
   "$appdir/usr/share/kd-hybrid/source/"
 
 cat > "$appdir/usr/share/applications/kd-hybrid-manager.desktop" <<'EOF'

@@ -1,4 +1,7 @@
-import { KNOWN_UPSTREAM } from "@kd-hybrid/runtime";
+import {
+  findKnownUpstreamRelease,
+  KNOWN_UPSTREAM_RELEASES
+} from "@kd-hybrid/runtime";
 
 const SUPPORTED_PIXI_VERSION = "7.2.1";
 const DEFAULT_INSTALL_TIMEOUT_MS = 30_000;
@@ -469,17 +472,27 @@ function compatibilityStatus(
   options: KinkyDungeonFramePacingOptions,
   target: FramePacingTarget
 ): { readonly compatible: boolean; readonly reason: string } {
-  if (options.upstreamVersion !== KNOWN_UPSTREAM.gameVersion) {
+  const releaseForVersion = KNOWN_UPSTREAM_RELEASES.find(
+    (release) => release.gameVersion === options.upstreamVersion
+  );
+  if (releaseForVersion === undefined) {
     return {
       compatible: false,
       reason: `unsupported-kd-version:${options.upstreamVersion ?? "unknown"}`
     };
   }
   const bundleSha256 = options.upstreamBundleSha256?.toLowerCase();
-  if (bundleSha256 !== KNOWN_UPSTREAM.bundleSha256) {
+  const releaseForBundle = findKnownUpstreamRelease(bundleSha256);
+  if (releaseForBundle === undefined) {
     return {
       compatible: false,
       reason: `unsupported-kd-bundle:${bundleSha256 ?? "unknown"}`
+    };
+  }
+  if (releaseForBundle !== releaseForVersion) {
+    return {
+      compatible: false,
+      reason: `mismatched-kd-release:${options.upstreamVersion}:${bundleSha256}`
     };
   }
   const pixi = record(target.PIXI);

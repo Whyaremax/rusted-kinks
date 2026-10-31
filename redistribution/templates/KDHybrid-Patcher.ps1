@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidateSet("Install", "Status", "Configure", "Uninstall")]
-    [string]$Action = "Status",
+    [string]$Action = "Install",
     [string]$GameRoot,
     [ValidateSet("quality", "fast", "human")]
     [string]$PathfindingMode = "fast",
@@ -83,8 +83,6 @@ if ($Action -eq "Install") {
     $arguments += @(
         "--payload",
         $payload,
-        "--upstream-version",
-        "5.4.92",
         "--pathfinding-mode",
         $PathfindingMode,
         "--texture-mode",

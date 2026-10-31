@@ -1,0 +1,159 @@
+diff --git a/out/main.js b/out/main.js
+index 9cd6eff..5991bc1 100644
+--- a/out/main.js
++++ b/out/main.js
+@@ -57104,7 +57104,7 @@ let KDPaletteWidth = 6;
+ let KDDefaultPalette = "";
+ let KDCULLTIME = 10000;
+ let KDLoadingFinishedSet = false;
+-PIXI.settings.SCALE_MODE = PIXI.SCALE_MODES.LINEAR;
++PIXI.BaseTexture.defaultOptions.scaleMode = PIXI.SCALE_MODES.LINEAR;
+ let KDStandardRenderException = {
+     Consent: [],
+     Intro: [],
+@@ -57846,7 +57846,6 @@ function KDReloadMainData(force) {
+         console.log(KinkyDungeonKeybindings);
+     }
+     else {
+-        console.log("Failed to load keybindings");
+         KDSetDefaultKeybindings();
+     }
+ }
+@@ -60565,7 +60564,6 @@ function KinkyDungeonDBLoad(saveslot) {
+                     res(outstring);
+                 }
+                 else {
+-                    console.log(`Successfully loaded, but no save data present in slot ${saveslot}`);
+                     res(null);
+                 }
+             };
+@@ -120730,7 +120728,7 @@ function KDDraw(Container, Map, id, Image, Left, Top, Width, Height, Rotation, o
+     }
+     if (sprite) {
+         sprite.visible = true;
+-        sprite.interactive = false;
++        sprite.eventMode = "auto";
+         let tex = KDTex(Image);
+         if (tex)
+             sprite.texture = tex;
+@@ -120876,7 +120874,7 @@ function KDDrawRT(Container, Map, id, filterid, Image, Left, Top, Width, Height,
+     }
+     if (sprite && sprite.texture && sprite.texture.orig) {
+         sprite.visible = true;
+-        sprite.interactive = false;
++        sprite.eventMode = "auto";
+         sprite.name = id;
+         sprite.path = Image;
+         sprite.position.x = Left;
+@@ -120965,7 +120963,7 @@ function KDTex(Image, Nearest) {
+     }
+ }
+ function string2hex(str) {
+-    return PIXI.utils.string2hex(str);
++    return PIXI.Color.shared.setValue(str).toNumber();
+ }
+ function GetAdjacentList(list, index, width) {
+     return {
+@@ -158750,9 +158748,12 @@ function KinkyDungeonGetPath(closed, xx, yy, endx, endy) {
+     return list.reverse();
+ }
+ function KDSetPathfindCache(PathMap, newPath, endx, endy, Tiles, Finalindex) {
++    const hoist = !globalThis.KDHybridSourcePatchControl?.disablePathCacheHoistedKeySuffix
++        && typeof endx === "number" && typeof endy === "number" && typeof Tiles === "string";
++    const suffix = hoist ? `,${endx},${endy},${Tiles}` : "";
+     for (let i = 0; i < newPath.length - 1; i++) {
+         let path = newPath.slice(i);
+-        let index = `${path[0].x},${path[0].y},${endx},${endy},${Tiles}`;
++        let index = hoist ? `${path[0].x},${path[0].y}${suffix}` : `${path[0].x},${path[0].y},${endx},${endy},${Tiles}`;
+         PathMap.set(index, path.slice(1));
+     }
+     if (Finalindex)
+@@ -172738,8 +172739,6 @@ function KinkyDungeonGetEnemy(enemytags, Level, Index, Tile, requireTags, allian
+     let selection = KDRandom() * enemyWeightTotal;
+     for (let L = enemyWeights.length - 1; L >= 0; L--) {
+         if (selection > enemyWeights[L].weight) {
+-            if (enemyWeights[L].enemy.name == "Mimic")
+-                console.log("Mimic says boo");
+             return enemyWeights[L].enemy;
+         }
+     }
+@@ -223557,12 +223556,13 @@ var PIXIapp = new PIXI.Application({
+     width: PIXIWidth,
+     height: PIXIHeight,
+ });
+-PIXI.settings.FILTER_RESOLUTION = resolution;
++PIXI.Filter.defaultResolution = resolution;
+ document.body.appendChild(PIXIapp.view);
+ PIXIapp.stage.addChild(kdcanvas);
+ PIXIapp.stage.addChild(kdui);
+ let ticker = PIXI.Ticker.shared;
+-window.onload = function () {
++window.onload = async function () {
++    await KDLogoLoadPromise;
+     KinkyDungeonRootDirectory = "Game/";
+     pixiview = KinkyDungeonGetCanvas("MainCanvas");
+     CommonIsMobile = CommonDetectMobile();
+@@ -224333,7 +224333,6 @@ let CurrentLoading = "";
+ let lastProgress = 0;
+ function incrementProgress(amount) {
+     return (progress) => {
+-        console.log(progress);
+         if (progress < lastProgress)
+             lastProgress = 0;
+         KDLoadingDone += (progress - lastProgress) * amount;
+@@ -224344,7 +224343,6 @@ let buildSuff = "";
+ async function LoadTextureAtlas(list, scale_mode, preload = false) {
+     PIXI.BaseTexture.defaultOptions.scaleMode = scale_mode;
+     for (let dataFile of list) {
+-        console.log("Found atlas: " + dataFile);
+         let amount = 100;
+         KDLoadingMax += amount;
+     }
+@@ -224358,22 +224356,7 @@ async function LoadTextureAtlas(list, scale_mode, preload = false) {
+             CurrentLoading = "Error Loading " + dataFile;
+             KDLoadingDone += amount;
+         })
+-            : await PIXI.Assets.load(dataFile + buildSuff).then((value) => {
+-                for (let s of Object.values(value.linkedSheets)) {
+-                    for (let t of Object.keys(s.textures)) {
+-                        let tsprite = PIXI.Sprite.from(KDTex(t, scale_mode == PIXI.SCALE_MODES.NEAREST));
+-                        let rt = PIXI.RenderTexture.create({ width: 100, height: 100,
+-                            scaleMode: scale_mode,
+-                            resolution: 1 });
+-                        PIXIapp.renderer.render(tsprite, {
+-                            clear: true,
+-                            renderTexture: rt,
+-                            blit: true,
+-                        });
+-                        tsprite.destroy();
+-                        rt.destroy(true);
+-                    }
+-                }
++            : await PIXI.Assets.load(dataFile + buildSuff).then(() => {
+                 let amount = 100;
+                 CurrentLoading = "Loaded " + dataFile;
+                 KDLoadingDone += amount;
+@@ -224407,6 +224390,7 @@ async function PreloadDisplacement(list) {
+         });
+     }
+ }
++let KDLogoLoadPromise;
+ async function load() {
+     for (let font of KDFonts.values()) {
+         if (font.src) {
+@@ -224422,13 +224406,10 @@ async function load() {
+         }
+     }
+     PIXI.BaseTexture.defaultOptions.mipmap = PIXI.MIPMAP_MODES.ON;
+-    PIXI.Assets.load("Logo.png");
++    KDLogoLoadPromise = PIXI.Assets.load("Logo.png").catch(() => PIXI.Texture.from("Logo.png"));
++    await KDLogoLoadPromise;
+     await LoadTextureAtlas(nearestList, KDToggles.NearestNeighbor ? PIXI.SCALE_MODES.NEAREST : PIXI.SCALE_MODES.LINEAR);
+     await LoadTextureAtlas(linearList, PIXI.SCALE_MODES.LINEAR);
+-    setTimeout(() => {
+-        LoadTextureAtlas(nearestList, KDToggles.NearestNeighbor ? PIXI.SCALE_MODES.NEAREST : PIXI.SCALE_MODES.LINEAR);
+-        LoadTextureAtlas(linearList, PIXI.SCALE_MODES.LINEAR);
+-    }, 700);
+     PIXI.BaseTexture.defaultOptions.scaleMode = KDToggles.NearestNeighbor ? PIXI.SCALE_MODES.NEAREST : PIXI.SCALE_MODES.LINEAR;
+ }
+ load();

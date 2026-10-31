@@ -20,7 +20,14 @@ import {
 declare const KDModFiles: Record<string, string>;
 declare const KinkyDungeonRootDirectory: string;
 declare const wasm_bindgen: {
-  (source: { readonly module_or_path: string }): Promise<unknown>;
+  (source: {
+    readonly module_or_path:
+      | RequestInfo
+      | URL
+      | Response
+      | BufferSource
+      | WebAssembly.Module;
+  }): Promise<unknown>;
   readonly HybridEngine: WasmBindings["HybridEngine"];
 };
 
@@ -54,76 +61,75 @@ async function initialize(): Promise<void> {
   if (wasmUrl === null) {
     throw new Error("KD mod loader did not expose kd_hybrid_core_bg.wasm");
   }
+  const wasmResponse = await fetch(wasmUrl);
+  if (!wasmResponse.ok) {
+    throw new Error(
+      `KD mod loader WASM request failed with HTTP ${wasmResponse.status}`,
+    );
+  }
+  // KD's ZIP loader gives Blob URLs a non-WASM MIME type. Read the bytes first
+  // so wasm-bindgen never attempts noisy instantiateStreaming fallback.
+  const wasmBytes = await wasmResponse.arrayBuffer();
   const bindings: WasmBindings = {
-    default: (source) => wasm_bindgen({ module_or_path: String(source) }),
+    default: (source) => {
+      if (source === undefined) {
+        throw new TypeError("KD Hybrid WASM bytes are unavailable");
+      }
+      return wasm_bindgen({ module_or_path: source });
+    },
     HybridEngine: wasm_bindgen.HybridEngine,
   };
-  await runtime.initializeNative(bindings, wasmUrl);
-  const externalAdapters = globalThis.KDHybridAdapterPack ?? [];
+  await runtime.initializeNative(bindings, wasmBytes);
+  const externalAdapters = Array.isArray(globalThis.KDHybridAdapterPack)
+    ? globalThis.KDHybridAdapterPack
+    : [];
   if (
-    !externalAdapters.some(
-      (adapter) => adapter.globalName === "KinkyDungeonCreateMap",
-    )
+    !hasExternalAdapter(externalAdapters, "KinkyDungeonCreateMap")
   ) {
     installKinkyDungeonMapGenerationAdapter(runtime);
   }
   if (
-    !externalAdapters.some(
-      (adapter) => adapter.globalName === "KinkyDungeonGetEnemy",
-    )
+    !hasExternalAdapter(externalAdapters, "KinkyDungeonGetEnemy")
   ) {
     installKDEnemySelectorAdapter(runtime);
   }
   if (
-    !externalAdapters.some(
-      (adapter) => adapter.globalName === "KinkyDungeonFindPath",
-    )
+    !hasExternalAdapter(externalAdapters, "KinkyDungeonFindPath")
   ) {
     installKinkyDungeonPathfindingAdapter(runtime);
   }
   if (
-    !externalAdapters.some(
-      (adapter) => adapter.globalName === "KDNearbyEnemies",
-    )
+    !hasExternalAdapter(externalAdapters, "KDNearbyEnemies")
   ) {
     installKDNearbyEnemiesAdapter(runtime);
   }
   if (
     !hasKDNearestPlayerSourcePatch() &&
-    !externalAdapters.some(
-      (adapter) => adapter.globalName === "KDCommanderUpdateRoles",
-    )
+    !hasExternalAdapter(externalAdapters, "KDCommanderUpdateRoles")
   ) {
     installKDCommanderHelpShortcutAdapter(runtime);
   }
   if (
-    !externalAdapters.some(
-      (adapter) => adapter.globalName === "KinkyDungeonFindMaster",
-    )
+    !hasExternalAdapter(externalAdapters, "KinkyDungeonFindMaster")
   ) {
     installKDFindMasterAdapter(runtime);
   }
   if (
-    !externalAdapters.some(
-      (adapter) => adapter.globalName === "KinkyDungeonUpdateEnemies",
-    )
+    !hasExternalAdapter(externalAdapters, "KinkyDungeonUpdateEnemies")
   ) {
     installKDEnemyUpdateCacheAdapter(runtime);
   }
   if (
-    !externalAdapters.some(
-      (adapter) => adapter.globalName === "KinkyDungeonPlaceJailKeys",
-    )
+    !hasExternalAdapter(externalAdapters, "KinkyDungeonPlaceJailKeys")
   ) {
     installKDJailKeyEarlyReturnAdapter(runtime);
   }
-  for (const adapter of externalAdapters) {
-    runtime.registerAdapter(adapter);
+  for (let index = 0; index < externalAdapters.length; index += 1) {
+    const adapter = externalAdapters[index];
+    if (adapter !== undefined) runtime.registerAdapter(adapter);
   }
   if (
-    !externalAdapters.some(
-      (adapter) => adapter.globalName === "KinkyDungeonNearestPlayer",
-    )
+    !hasExternalAdapter(externalAdapters, "KinkyDungeonNearestPlayer")
   ) {
     // Install after external adapters so the handler captures the actual
     // nearby-enemy facade that KD will call.
@@ -133,6 +139,16 @@ async function initialize(): Promise<void> {
   // functions; it disables only the conflicting native facade.
   setTimeout(() => runtime.dispatcher.reconcile(), 0);
   setTimeout(() => runtime.dispatcher.reconcile(), 2_000);
+}
+
+function hasExternalAdapter(
+  adapters: readonly NativeAdapterRegistration[],
+  globalName: string,
+): boolean {
+  for (let index = 0; index < adapters.length; index += 1) {
+    if (adapters[index]?.globalName === globalName) return true;
+  }
+  return false;
 }
 
 function findModFile(suffix: string): string | null {

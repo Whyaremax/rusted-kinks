@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   KNOWN_BUNDLES,
+  ensureModernMobileMeta,
   install,
   status,
   uninstall,
@@ -26,14 +27,52 @@ const fixtures: string[] = [];
 it("distinguishes the in-game and Electron package versions", () => {
   expect(KNOWN_BUNDLES["5.4.92"]).toEqual({
     packageVersion: "5.1.12",
-    bundleSha256: "2d3041a085cbe475a63227ff40709f6d9c1595c77a58545c69edf359a57605a4"
+    bundleSha256:
+      "2d3041a085cbe475a63227ff40709f6d9c1595c77a58545c69edf359a57605a4"
+  });
+});
+
+describe("known-build mobile capability metadata", () => {
+  it("adds the modern tag adjacent to the single deprecated tag", () => {
+    const original =
+      '<head>\r\n  <meta name="apple-mobile-web-app-capable" content="yes">\r\n  <title>KD</title>\r\n</head>\r\n';
+    expect(ensureModernMobileMeta(original, true)).toBe(
+      '<head>\r\n  <meta name="apple-mobile-web-app-capable" content="yes">\r\n  <meta name="mobile-web-app-capable" content="yes">\r\n  <title>KD</title>\r\n</head>\r\n'
+    );
+  });
+
+  it("preserves existing modern metadata and unknown developer indexes", () => {
+    const modern =
+      '<meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes">';
+    expect(ensureModernMobileMeta(modern, true)).toBe(modern);
+    const unknown = "<head><title>fixture</title></head>";
+    expect(ensureModernMobileMeta(unknown, false)).toBe(unknown);
+  });
+
+  it("fails closed for an ambiguous known-build index", () => {
+    expect(() => ensureModernMobileMeta("<head></head>", true)).toThrow(
+      /ambiguous mobile web app/u
+    );
+    expect(() =>
+      ensureModernMobileMeta(
+        '<meta name="apple-mobile-web-app-capable"><meta name="apple-mobile-web-app-capable">',
+        true
+      )
+    ).toThrow(/ambiguous mobile web app/u);
+  });
+  expect(KNOWN_BUNDLES["5.5.1"]).toEqual({
+    packageVersion: "5.1.12",
+    bundleSha256:
+      "60a85515783853653fd051936429494b8ef85024ff66b08134e68f9fe89248e0"
   });
 });
 
 afterEach(async () => {
   const { rm } = await import("node:fs/promises");
   await Promise.all(
-    fixtures.splice(0).map((fixture) => rm(fixture, { recursive: true, force: true }))
+    fixtures
+      .splice(0)
+      .map((fixture) => rm(fixture, { recursive: true, force: true }))
   );
 });
 
@@ -48,18 +87,20 @@ describe("reversible patcher", () => {
       allowUnknownBundle: true
     });
     expect(first.state).toBe("installed");
-    expect(await install({
-      appRoot: fixture.appRoot,
-      payloadRoot: fixture.payloadRoot,
-      toolVersion: "test",
-      allowUnknownBundle: true
-    })).toEqual(first);
-    expect(await readFile(join(fixture.appRoot, "index.html"), "utf8")).toContain(
-      "kd-hybrid/kd-hybrid-bootstrap.js"
-    );
-    expect(await readFile(join(fixture.appRoot, "index.html"), "utf8")).toContain(
-      '"sourceOptimizations":false'
-    );
+    expect(
+      await install({
+        appRoot: fixture.appRoot,
+        payloadRoot: fixture.payloadRoot,
+        toolVersion: "test",
+        allowUnknownBundle: true
+      })
+    ).toEqual(first);
+    expect(
+      await readFile(join(fixture.appRoot, "index.html"), "utf8")
+    ).toContain("kd-hybrid/kd-hybrid-bootstrap.js");
+    expect(
+      await readFile(join(fixture.appRoot, "index.html"), "utf8")
+    ).toContain('"sourceOptimizations":false');
     expect(first.manifest?.settings?.sourceOptimizations).toBe(false);
     expect(first.manifest?.modBridge).toMatchObject({
       path: "Mods/KDHybridBridge.zip",
@@ -75,13 +116,19 @@ describe("reversible patcher", () => {
 
     const removed = await uninstall(fixture.appRoot);
     expect(removed.state).toBe("not-installed");
-    expect(await readFile(join(fixture.appRoot, "index.html"))).toEqual(original);
+    expect(await readFile(join(fixture.appRoot, "index.html"))).toEqual(
+      original
+    );
     await expect(
-      stat(join(dirname(dirname(fixture.appRoot)), "Mods", "KDHybridBridge.zip"))
+      stat(
+        join(dirname(dirname(fixture.appRoot)), "Mods", "KDHybridBridge.zip")
+      )
     ).rejects.toThrow();
     expect(await readFile(fixture.saveSentinel, "utf8")).toBe("do-not-touch");
     expect(
-      (await stat(join(fixture.appRoot, ".kd-hybrid", "uninstalled"))).isDirectory()
+      (
+        await stat(join(fixture.appRoot, ".kd-hybrid", "uninstalled"))
+      ).isDirectory()
     ).toBe(true);
   });
 
@@ -111,6 +158,94 @@ describe("reversible patcher", () => {
     );
     expect((await status(fixture.appRoot)).state).toBe("modified");
     await expect(uninstall(fixture.appRoot)).rejects.toThrow(/changed/u);
+  });
+
+  it("detects unrecorded payload and a tampered index backup", async () => {
+    const fixture = await createFixture();
+    const installed = await install({
+      appRoot: fixture.appRoot,
+      payloadRoot: fixture.payloadRoot,
+      toolVersion: "test",
+      allowUnknownBundle: true
+    });
+    const extra = join(fixture.appRoot, "kd-hybrid", "unrecorded.txt");
+    await writeFile(extra, "extra");
+    expect(await status(fixture.appRoot)).toMatchObject({
+      state: "modified",
+      problems: [
+        "kd-hybrid/unrecorded.txt is not recorded in the installation manifest"
+      ]
+    });
+    await rm(extra);
+
+    await writeFile(
+      join(fixture.appRoot, installed.manifest!.index.backupPath),
+      "tampered backup"
+    );
+    const modified = await status(fixture.appRoot);
+    expect(modified.state).toBe("modified");
+    expect(modified.problems).toContain(
+      "Original index.html backup hash does not match the manifest"
+    );
+  });
+
+  it("rejects forged schema-1 destructive metadata", async () => {
+    const fixture = await createFixture();
+    await install({
+      appRoot: fixture.appRoot,
+      payloadRoot: fixture.payloadRoot,
+      toolVersion: "test",
+      allowUnknownBundle: true
+    });
+    const manifestPath = join(
+      fixture.appRoot,
+      ".kd-hybrid",
+      "installation.json"
+    );
+    const baseline = JSON.parse(await readFile(manifestPath, "utf8")) as {
+      id: string;
+      appRoot: string;
+      index: { path: string; backupPath: string };
+      upstream: { bundlePath: string };
+      files: Array<{ path: string; sha256: string; bytes: number }>;
+    };
+    const mutations: Array<(manifest: typeof baseline) => void> = [
+      (manifest) => {
+        manifest.id = "../escape";
+      },
+      (manifest) => {
+        manifest.appRoot = "..";
+      },
+      (manifest) => {
+        manifest.index.path = "out/main.js";
+      },
+      (manifest) => {
+        manifest.index.backupPath = ".kd-hybrid/backups/elsewhere/index.html";
+      },
+      (manifest) => {
+        manifest.upstream.bundlePath = "Scripts/other.js";
+      },
+      (manifest) => {
+        manifest.files[0]!.sha256 = manifest.files[0]!.sha256.toUpperCase();
+      },
+      (manifest) => {
+        manifest.files[0]!.bytes = 1.5;
+      },
+      (manifest) => {
+        manifest.files.push({ ...manifest.files[0]! });
+      },
+      (manifest) => {
+        manifest.files[0]!.path = "other/unowned.txt";
+      }
+    ];
+    for (const mutate of mutations) {
+      const forged = structuredClone(baseline);
+      mutate(forged);
+      await writeFile(manifestPath, `${JSON.stringify(forged, null, 2)}\n`);
+      await expect(status(fixture.appRoot)).rejects.toThrow();
+    }
+    await writeFile(manifestPath, `${JSON.stringify(baseline, null, 2)}\n`);
+    expect((await status(fixture.appRoot)).state).toBe("installed");
   });
 
   it("refuses to overwrite or remove a user-owned bridge mod", async () => {
@@ -171,9 +306,10 @@ describe("reversible patcher", () => {
       ".kd-hybrid",
       "installation.json"
     );
-    const legacy = JSON.parse(
-      await readFile(manifestPath, "utf8")
-    ) as Record<string, unknown> & {
+    const legacy = JSON.parse(await readFile(manifestPath, "utf8")) as Record<
+      string,
+      unknown
+    > & {
       files: Array<{ path: string }>;
     };
     delete legacy.modBridge;
@@ -181,9 +317,7 @@ describe("reversible patcher", () => {
       (file) => file.path !== "kd-hybrid/KDHybridBridge.zip"
     );
     await writeFile(manifestPath, `${JSON.stringify(legacy, null, 2)}\n`);
-    await rm(
-      join(fixture.appRoot, "kd-hybrid", "KDHybridBridge.zip")
-    );
+    await rm(join(fixture.appRoot, "kd-hybrid", "KDHybridBridge.zip"));
     await rm(
       join(dirname(dirname(fixture.appRoot)), "Mods", "KDHybridBridge.zip")
     );
@@ -193,7 +327,10 @@ describe("reversible patcher", () => {
       join(fixture.payloadRoot, "kd-hybrid-bootstrap.js"),
       "globalThis.fixture = 'upgraded';\n"
     );
-    await writeFile(join(fixture.payloadRoot, "KDHybridBridge.zip"), "new bridge");
+    await writeFile(
+      join(fixture.payloadRoot, "KDHybridBridge.zip"),
+      "new bridge"
+    );
     const upgraded = await install({
       appRoot: fixture.appRoot,
       payloadRoot: fixture.payloadRoot,
@@ -203,9 +340,7 @@ describe("reversible patcher", () => {
 
     expect(upgraded.state).toBe("installed");
     expect(upgraded.manifest?.toolVersion).toBe("new");
-    expect(upgraded.manifest?.modBridge?.path).toBe(
-      "Mods/KDHybridBridge.zip"
-    );
+    expect(upgraded.manifest?.modBridge?.path).toBe("Mods/KDHybridBridge.zip");
     expect(
       await readFile(
         join(fixture.appRoot, "kd-hybrid", "kd-hybrid-bootstrap.js"),
@@ -245,12 +380,14 @@ describe("reversible patcher", () => {
     expect(updated.manifest?.settings?.pathfindingMode).toBe("human");
     expect(updated.manifest?.settings?.textureMode).toBe("auto");
     expect(updated.manifest?.index.backupPath).toBe(backupPath);
-    expect(await readFile(join(fixture.appRoot, "index.html"), "utf8")).toContain(
-      '"pathfindingMode":"human"'
-    );
+    expect(
+      await readFile(join(fixture.appRoot, "index.html"), "utf8")
+    ).toContain('"pathfindingMode":"human"');
 
     await uninstall(fixture.appRoot);
-    expect(await readFile(join(fixture.appRoot, "index.html"))).toEqual(original);
+    expect(await readFile(join(fixture.appRoot, "index.html"))).toEqual(
+      original
+    );
     expect(await readFile(fixture.saveSentinel, "utf8")).toBe("do-not-touch");
   });
 
@@ -266,18 +403,18 @@ describe("reversible patcher", () => {
       textureMode: "full"
     });
     const backupPath = installed.manifest?.index.backupPath;
-    expect(await readFile(join(fixture.appRoot, "index.html"), "utf8")).toContain(
-      '"rendering":{"textureMode":"full"}'
-    );
+    expect(
+      await readFile(join(fixture.appRoot, "index.html"), "utf8")
+    ).toContain('"rendering":{"textureMode":"full"}');
 
     for (const mode of ["mobile", "original"] as const) {
       const updated = await updateTextureMode(fixture.appRoot, mode);
       expect(updated.state).toBe("installed");
-    expect(updated.manifest?.settings).toEqual({
-      pathfindingMode: "quality",
-      textureMode: mode,
-      sourceOptimizations: false
-    });
+      expect(updated.manifest?.settings).toEqual({
+        pathfindingMode: "quality",
+        textureMode: mode,
+        sourceOptimizations: false
+      });
       expect(updated.manifest?.index.backupPath).toBe(backupPath);
       expect(
         await readFile(join(fixture.appRoot, "index.html"), "utf8")
@@ -315,7 +452,9 @@ describe("reversible patcher", () => {
     await rm(pendingPath);
 
     await uninstall(fixture.appRoot);
-    expect(await readFile(join(fixture.appRoot, "index.html"))).toEqual(original);
+    expect(await readFile(join(fixture.appRoot, "index.html"))).toEqual(
+      original
+    );
     expect(await readFile(fixture.saveSentinel, "utf8")).toBe("do-not-touch");
   });
 });
@@ -338,12 +477,15 @@ async function createFixture(): Promise<{
     '<!doctype html><script src="./out/main.js"></script>\n'
   );
   await writeFile(join(appRoot, "out", "main.js"), "fixture bundle\n");
-    await writeFile(
-      join(payloadRoot, "kd-hybrid-bootstrap.js"),
-      "globalThis.fixture = true;\n"
-    );
-    await writeFile(join(payloadRoot, "KDHybridBridge.zip"), "test");
-  await writeFile(join(payloadRoot, "wasm", "core.wasm"), Uint8Array.of(0, 97, 115, 109));
+  await writeFile(
+    join(payloadRoot, "kd-hybrid-bootstrap.js"),
+    "globalThis.fixture = true;\n"
+  );
+  await writeFile(join(payloadRoot, "KDHybridBridge.zip"), "test");
+  await writeFile(
+    join(payloadRoot, "wasm", "core.wasm"),
+    Uint8Array.of(0, 97, 115, 109)
+  );
   const saveSentinel = join(saveRoot, "profile.sav");
   await writeFile(saveSentinel, "do-not-touch");
   return { appRoot, payloadRoot, saveSentinel };

@@ -168,6 +168,105 @@ describe("legacy system dispatcher", () => {
     });
   });
 
+  it("propagates a throwing hookless native fallback request without retrying official", () => {
+    const officialError = new Error("official fallback failed");
+    let officialCalls = 0;
+    let nativeCalls = 0;
+    function ThrowingOfficial(_value: number): never {
+      officialCalls += 1;
+      throw officialError;
+    }
+    const throwingCandidate = {
+      id: "throwing-hookless-fallback",
+      name: ThrowingOfficial.name,
+      arity: ThrowingOfficial.length,
+      normalizedHash: functionSignature(ThrowingOfficial).normalizedHash,
+    };
+    const target: Record<string, unknown> = { ThrowingOfficial };
+    const dispatcher = new LegacySystemDispatcher(target);
+    dispatcher.registerSystem({
+      system: "pathfinding",
+      globalName: "ThrowingOfficial",
+      candidates: [throwingCandidate],
+      native: () => {
+        nativeCalls += 1;
+        return useJavaScriptFallback();
+      },
+    });
+
+    expect(() =>
+      (target.ThrowingOfficial as (value: number) => never)(4),
+    ).toThrow("official fallback failed");
+    expect(nativeCalls).toBe(1);
+    expect(officialCalls).toBe(1);
+    expect(dispatcher.status("pathfinding")[0]).toMatchObject({
+      mode: "native",
+      nativeCalls: 0,
+      fallbackCalls: 1,
+      failures: 1,
+      reason: null,
+    });
+  });
+
+  it.each([
+    ["cancelled by a before hook", true],
+    ["requested by the native adapter", false],
+  ] as const)(
+    "propagates a hooked official failure once when fallback is %s",
+    (_label, cancelBeforeNative) => {
+      const officialError = new Error("hooked official fallback failed");
+      let officialCalls = 0;
+      let nativeCalls = 0;
+      function ThrowingHookedOfficial(_value: number): never {
+        officialCalls += 1;
+        throw officialError;
+      }
+      const throwingCandidate = {
+        id: `throwing-hooked-fallback-${cancelBeforeNative}`,
+        name: ThrowingHookedOfficial.name,
+        arity: ThrowingHookedOfficial.length,
+        normalizedHash: functionSignature(ThrowingHookedOfficial)
+          .normalizedHash,
+      };
+      const target: Record<string, unknown> = { ThrowingHookedOfficial };
+      const dispatcher = new LegacySystemDispatcher(target);
+      dispatcher.registerSystem({
+        system: "pathfinding",
+        globalName: "ThrowingHookedOfficial",
+        candidates: [throwingCandidate],
+        native: () => {
+          nativeCalls += 1;
+          return useJavaScriptFallback();
+        },
+      });
+      if (cancelBeforeNative) {
+        dispatcher.registerHook("pathfinding", "before", (context) => {
+          context.cancelled = true;
+        });
+      } else {
+        dispatcher.registerHook("pathfinding", "before", () => undefined);
+      }
+      let observedError: unknown;
+      dispatcher.registerHook("pathfinding", "error", (context) => {
+        observedError = context.error;
+      });
+
+      expect(() =>
+        (target.ThrowingHookedOfficial as (value: number) => never)(4),
+      ).toThrow("hooked official fallback failed");
+      expect(nativeCalls).toBe(cancelBeforeNative ? 0 : 1);
+      expect(officialCalls).toBe(1);
+      expect(observedError).toBe(officialError);
+      expect(dispatcher.status("pathfinding")[0]).toMatchObject({
+        mode: "native",
+        nativeCalls: 0,
+        fallbackCalls: 1,
+        failures: 1,
+        reason: null,
+      });
+    },
+  );
+
   it("routes a verified facade directly to official JavaScript inside a scope", () => {
     const target: Record<string, unknown> = { OfficialPath };
     const dispatcher = new LegacySystemDispatcher(target);
@@ -413,6 +512,123 @@ describe("legacy system dispatcher", () => {
       mode: "native",
       nativeCalls: 1,
       fallbackCalls: 0,
+      failures: 1,
+    });
+  });
+
+  it("does not run official JavaScript after an after hook rejects a native result", () => {
+    let officialCalls = 0;
+    let nativeCalls = 0;
+    function CountedOfficial(value: number): number {
+      officialCalls += 1;
+      return value + 1;
+    }
+    const countedCandidate = {
+      id: "counted-native-after-hook",
+      name: CountedOfficial.name,
+      arity: CountedOfficial.length,
+      normalizedHash: functionSignature(CountedOfficial).normalizedHash,
+    };
+    const target: Record<string, unknown> = { CountedOfficial };
+    const dispatcher = new LegacySystemDispatcher(target);
+    dispatcher.registerSystem({
+      system: "pathfinding",
+      globalName: "CountedOfficial",
+      candidates: [countedCandidate],
+      native: (value) => {
+        nativeCalls += 1;
+        return Number(value) * 2;
+      },
+    });
+    const afterError = new Error("native after hook failed");
+    let observedError: unknown;
+    dispatcher.registerHook("pathfinding", "after", () => {
+      throw afterError;
+    });
+    dispatcher.registerHook("pathfinding", "error", (context) => {
+      observedError = context.error;
+    });
+
+    expect(() =>
+      (target.CountedOfficial as (value: number) => number)(4),
+    ).toThrow("native after hook failed");
+    expect(nativeCalls).toBe(1);
+    expect(officialCalls).toBe(0);
+    expect(observedError).toBe(afterError);
+    expect(dispatcher.status("pathfinding")[0]).toMatchObject({
+      mode: "js-fallback",
+      nativeCalls: 1,
+      fallbackCalls: 0,
+      failures: 1,
+      reason: "native-exception:native after hook failed",
+    });
+
+    expect((target.CountedOfficial as (value: number) => number)(4)).toBe(5);
+    expect(nativeCalls).toBe(1);
+    expect(officialCalls).toBe(1);
+    expect(dispatcher.status("pathfinding")[0]).toMatchObject({
+      mode: "js-fallback",
+      nativeCalls: 1,
+      fallbackCalls: 1,
+      failures: 1,
+    });
+  });
+
+  it("does not repeat a completed commander-style JavaScript call after an after hook throws", () => {
+    let officialCalls = 0;
+    let nativeCalls = 0;
+    function CountedCommander(value: number): { readonly value: number } {
+      officialCalls += 1;
+      return { value: value + 1 };
+    }
+    const commanderCandidate = {
+      id: "counted-commander-after-hook",
+      name: CountedCommander.name,
+      arity: CountedCommander.length,
+      normalizedHash: functionSignature(CountedCommander).normalizedHash,
+    };
+    const target: Record<string, unknown> = { CountedCommander };
+    const dispatcher = new LegacySystemDispatcher(target);
+    dispatcher.registerSystem({
+      system: "ai",
+      globalName: "CountedCommander",
+      candidates: [commanderCandidate],
+      native: (value) => {
+        nativeCalls += 1;
+        return completeJavaScriptCall(() =>
+          CountedCommander(Number(value)),
+        );
+      },
+    });
+    dispatcher.registerHook("ai", "after", () => {
+      throw new Error("commander after hook failed");
+    });
+
+    expect(() =>
+      (target.CountedCommander as (
+        value: number,
+      ) => { readonly value: number })(4),
+    ).toThrow("commander after hook failed");
+    expect(nativeCalls).toBe(1);
+    expect(officialCalls).toBe(1);
+    expect(dispatcher.status("ai")[0]).toMatchObject({
+      mode: "js-fallback",
+      nativeCalls: 1,
+      fallbackCalls: 0,
+      failures: 1,
+    });
+
+    expect(
+      (target.CountedCommander as (
+        value: number,
+      ) => { readonly value: number })(4),
+    ).toEqual({ value: 5 });
+    expect(nativeCalls).toBe(1);
+    expect(officialCalls).toBe(2);
+    expect(dispatcher.status("ai")[0]).toMatchObject({
+      mode: "js-fallback",
+      nativeCalls: 1,
+      fallbackCalls: 1,
       failures: 1,
     });
   });
